@@ -1,0 +1,569 @@
+import { useCallback, useMemo, useState } from 'react'
+import { getExercise } from './data'
+import { BottomNav } from './components/BottomNav'
+import { CalendarView } from './components/CalendarView'
+import { ExerciseDetail } from './components/ExerciseDetail'
+import { ExercisePicker } from './components/ExercisePicker'
+import { HistoryView } from './components/HistoryView'
+import { HomeView, type Tab } from './components/HomeView'
+import { LibraryView } from './components/LibraryView'
+import { MyExercisesView } from './components/MyExercisesView'
+import { NutritionView } from './components/NutritionView'
+import { Onboarding } from './components/Onboarding'
+import { ProfileView } from './components/ProfileView'
+import { ProgressView } from './components/ProgressView'
+import { AddRecordSheet, RecordsView } from './components/RecordsView'
+import { SessionView } from './components/SessionView'
+import { SkillsView } from './components/SkillsView'
+import { WorkoutsView } from './components/WorkoutsView'
+import { WorkoutTab } from './components/WorkoutTab'
+import { todayKey } from './lib/dates'
+import { computeStreak, deriveSessionStatus, recordCandidates } from './lib/stats'
+import { addSessionItem, emptySession, startSession } from './lib/session'
+import {
+  bestFor,
+  makeWorkoutItem,
+  resetAllData,
+  useDismissedSuggestions,
+  useLevelOverrides,
+  useMyExercises,
+  useNutrition,
+  useNutritionTargets,
+  useProfile,
+  useRecords,
+  useSessions,
+  useSkillProgress,
+  useTheme,
+  useWeightLog,
+  useWorkouts,
+} from './lib/store'
+import type { Exercise, Workout, WorkoutSession } from './types'
+
+type ExerciseTab = 'library' | 'mine' | 'skills'
+type ProgressTab = 'dashboard' | 'calendar' | 'records' | 'history'
+type WorkoutTabId = 'today' | 'builder'
+
+/** Where the exercise picker should put the exercises the user picks. */
+type PickerTarget =
+  | { kind: 'workout'; workoutId: string }
+  | { kind: 'session'; sessionId: string }
+
+export default function App() {
+  const { profile, update: updateProfile, completeOnboarding } = useProfile()
+  const { theme, setTheme } = useTheme()
+
+  const { ids, savedIds, toggle, clear } = useMyExercises()
+  const { workouts, createWorkout, updateWorkout, deleteWorkout, duplicateWorkout } = useWorkouts()
+  const { sessions, addSession, updateSession, deleteSession } = useSessions()
+  const { records, addRecord, deleteRecord } = useRecords()
+  const { days, updateDay, addMeal, updateMeal, deleteMeal } = useNutrition()
+  const { targets, setTargets } = useNutritionTargets()
+  const { entries: weightLog, logWeight, deleteWeight } = useWeightLog()
+  const { progress: skillProgress, setStage } = useSkillProgress()
+  const { overrides, setOverride } = useLevelOverrides()
+  const { dismissed, dismiss } = useDismissedSuggestions()
+
+  const [tab, setTab] = useState<Tab>('home')
+  const [exerciseTab, setExerciseTab] = useState<ExerciseTab>('library')
+  const [progressTab, setProgressTab] = useState<ProgressTab>('dashboard')
+  const [workoutTab, setWorkoutTab] = useState<WorkoutTabId>('today')
+
+  const [detail, setDetail] = useState<Exercise | null>(null)
+  const [picker, setPicker] = useState<PickerTarget | null>(null)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [openSkillId, setOpenSkillId] = useState<string | null>(null)
+  const [addRecordOpen, setAddRecordOpen] = useState(false)
+  const [seedExerciseIds, setSeedExerciseIds] = useState<string[]>([])
+  const [toast, setToast] = useState<string | null>(null)
+
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
+  const liveSession = activeSession?.status === 'in-progress' ? activeSession : null
+  const streak = useMemo(() => computeStreak(sessions, profile, workouts), [sessions, profile, workouts])
+
+  /* ── Actions ─────────────────────────────────────────────────────────── */
+
+  const notify = useCallback((text: string) => {
+    setToast(text)
+    window.setTimeout(() => setToast(null), 3400)
+  }, [])
+
+  const openSession = useCallback(
+    (session: WorkoutSession) => {
+      setActiveSessionId(session.id)
+      setWorkoutTab('today')
+      setTab('workout')
+    },
+    [],
+  )
+
+  const startWorkout = useCallback(
+    (workout: Workout) => {
+      if (!workout.items.length) {
+        notify('Add exercises to that workout before starting it.')
+        return
+      }
+      const session = startSession(workout, todayKey())
+      addSession(session)
+      setActiveSessionId(session.id)
+      setWorkoutTab('today')
+      setTab('workout')
+    },
+    [addSession, notify],
+  )
+
+  const startFreestyle = useCallback(() => {
+    const session = emptySession()
+    addSession(session)
+    setActiveSessionId(session.id)
+    setWorkoutTab('today')
+    setTab('workout')
+  }, [addSession])
+
+  const finishSession = useCallback(
+    (session: WorkoutSession) => {
+      const finished: WorkoutSession = {
+        ...session,
+        status: deriveSessionStatus(session),
+        completedAt: Date.now(),
+        durationSec: Math.max(1, Math.round((Date.now() - session.startedAt) / 1000)),
+      }
+      updateSession(finished.id, {
+        status: finished.status,
+        completedAt: finished.completedAt,
+        durationSec: finished.durationSec,
+      })
+      setActiveSessionId(null)
+
+      // Records come only from work that was actually logged, so a personal
+      // best can never be invented by merely opening the app.
+      let beaten = 0
+      for (const candidate of recordCandidates(finished)) {
+        const counted = addRecord({
+          exerciseId: candidate.exerciseId,
+          metric: candidate.metric,
+          value: candidate.value,
+          sessionId: finished.id,
+          achievedAt: finished.completedAt,
+        })
+        if (counted) beaten += 1
+      }
+
+      if (finished.status === 'skipped') notify('Filed as a skipped day.')
+      else if (beaten)
+        notify(`🎉 ${beaten === 1 ? 'New personal record' : `${beaten} new personal records`} — ${finished.workoutName} saved.`)
+      else notify(`${finished.workoutName} saved as ${finished.status}.`)
+    },
+    [addRecord, notify, updateSession],
+  )
+
+  const discardSession = useCallback(
+    (session: WorkoutSession) => {
+      deleteSession(session.id)
+      setActiveSessionId(null)
+      notify('Session discarded — nothing was saved.')
+    },
+    [deleteSession, notify],
+  )
+
+  const goToProgress = useCallback((target: ProgressTab) => {
+    setProgressTab(target)
+    setTab('progress')
+  }, [])
+
+  const openSkill = useCallback((skillId: string) => {
+    setOpenSkillId(skillId)
+    setExerciseTab('skills')
+    setTab('exercises')
+  }, [])
+
+  /** Creates a workout and jumps straight into the builder with it open. */
+  const createWorkoutWithSeeds = useCallback(
+    (name: string, day: string, seeds: string[]) => {
+      const workout = createWorkout(name, day)
+      if (seeds.length) {
+        // The builder promises "N selected exercises will be added" — so add
+        // them now rather than only telling the user about them. Each exercise
+        // starts from its own recommended sets/reps/rest.
+        const items = seeds
+          .map((id) => getExercise(id))
+          .filter((exercise): exercise is Exercise => Boolean(exercise))
+          .map(makeWorkoutItem)
+        if (items.length) updateWorkout(workout.id, { items })
+        setSeedExerciseIds(items.map((item) => item.exerciseId))
+      }
+      setWorkoutTab('builder')
+      setTab('workout')
+      return workout
+    },
+    [createWorkout, updateWorkout],
+  )
+
+  const pickerPresentIds = useMemo(() => {
+    if (!picker) return []
+    if (picker.kind === 'workout') {
+      return (workouts.find((workout) => workout.id === picker.workoutId)?.items ?? []).map(
+        (item) => item.exerciseId,
+      )
+    }
+    return (sessions.find((session) => session.id === picker.sessionId)?.items ?? []).map(
+      (item) => item.exerciseId,
+    )
+  }, [picker, workouts, sessions])
+
+  const handlePick = useCallback(
+    (exercise: Exercise) => {
+      if (!picker) return
+      if (picker.kind === 'workout') {
+        const workout = workouts.find((entry) => entry.id === picker.workoutId)
+        if (!workout) return
+        updateWorkout(workout.id, {
+          items: [...workout.items, makeWorkoutItem(exercise, workout.items.length)],
+        })
+        notify(`Added ${exercise.name}.`)
+        return
+      }
+      const session = sessions.find((entry) => entry.id === picker.sessionId)
+      if (!session) return
+      updateSession(session.id, { items: [...session.items, addSessionItem(exercise)] })
+      notify(`Added ${exercise.name} to the session.`)
+    },
+    [picker, workouts, sessions, updateWorkout, updateSession, notify],
+  )
+
+  /* ── Onboarding gate ─────────────────────────────────────────────────── */
+
+  if (!profile.onboarded) {
+    return (
+      <div className="min-h-dvh px-4 py-8">
+        <Onboarding initial={null} onComplete={completeOnboarding} />
+      </div>
+    )
+  }
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+
+  return (
+    <div className="min-h-dvh pb-24 md:pb-10">
+      <BottomNav
+        active={tab}
+        onChange={setTab}
+        badges={{ workout: liveSession ? true : undefined }}
+      />
+
+      <main className="mx-auto max-w-5xl px-4 py-5">
+        {tab === 'home' && (
+          <HomeView
+            profile={profile}
+            workouts={workouts}
+            sessions={sessions}
+            records={records}
+            streak={streak}
+            activeSessionId={liveSession?.id ?? null}
+            onStart={startWorkout}
+            onResume={openSession}
+            onGoTo={(target) => {
+              if (target === 'exercises') setExerciseTab('library')
+              setTab(target)
+            }}
+            onOpenExercise={setDetail}
+            onOpenSkill={openSkill}
+          />
+        )}
+
+        {tab === 'workout' && (
+          <>
+            <SubTabs
+              value={workoutTab}
+              onChange={setWorkoutTab}
+              options={[
+                { id: 'today', label: 'Today', dot: Boolean(liveSession) },
+                { id: 'builder', label: 'My Workouts' },
+              ]}
+            />
+
+            {workoutTab === 'today' &&
+              (liveSession ? (
+                <SessionView
+                  session={liveSession}
+                  onChange={(patch) => updateSession(liveSession.id, patch)}
+                  onFinish={() => finishSession(liveSession)}
+                  onDiscard={() => discardSession(liveSession)}
+                  onOpenExercise={setDetail}
+                  onRequestAddExercise={() =>
+                    setPicker({ kind: 'session', sessionId: liveSession.id })
+                  }
+                />
+              ) : (
+                <WorkoutTab
+                  workouts={workouts}
+                  sessions={sessions}
+                  profile={profile}
+                  streak={streak}
+                  onStart={startWorkout}
+                  onStartFreestyle={startFreestyle}
+                  onResume={openSession}
+                  onOpenBuilder={() => {
+                    setWorkoutTab('builder')
+                    notify('Pick a workout below to edit it, or create a new one.')
+                  }}
+                  onGoTo={(target) => {
+                    if (target === 'builder') setWorkoutTab('builder')
+                    else goToProgress('history')
+                  }}
+                />
+              ))}
+
+            {workoutTab === 'today' && !liveSession && (
+              <button
+                type="button"
+                onClick={() => goToProgress('history')}
+                className="mt-4 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+              >
+                📋 View full history &amp; weekly summary
+              </button>
+            )}
+
+            {workoutTab === 'builder' && (
+              <WorkoutsView
+                workouts={workouts}
+                onCreate={createWorkoutWithSeeds}
+                onUpdate={updateWorkout}
+                onDelete={deleteWorkout}
+                onDuplicate={duplicateWorkout}
+                onRequestAddExercise={(workoutId) => setPicker({ kind: 'workout', workoutId })}
+                onOpenExercise={setDetail}
+                seedExerciseIds={seedExerciseIds}
+                onSeedConsumed={() => setSeedExerciseIds([])}
+              />
+            )}
+          </>
+        )}
+
+        {tab === 'exercises' && (
+          <>
+            <SubTabs
+              value={exerciseTab}
+              onChange={setExerciseTab}
+              options={[
+                { id: 'library', label: 'Library' },
+                { id: 'mine', label: `My Exercises${ids.length ? ` (${ids.length})` : ''}` },
+                { id: 'skills', label: 'Skills' },
+              ]}
+            />
+
+            {exerciseTab === 'library' && (
+              <LibraryView savedIds={savedIds} onToggleSave={toggle} onOpen={setDetail} />
+            )}
+
+            {exerciseTab === 'mine' && (
+              <MyExercisesView
+                ids={ids}
+                onToggleSave={toggle}
+                onOpen={setDetail}
+                onClear={clear}
+                onGoToLibrary={() => setExerciseTab('library')}
+                onStartWorkout={(exerciseIds) =>
+                  createWorkoutWithSeeds('New workout', '', exerciseIds)
+                }
+              />
+            )}
+
+            {exerciseTab === 'skills' && (
+              <SkillsView
+                initialSkillId={openSkillId}
+                progress={skillProgress}
+                onSetStage={setStage}
+                onOpenExercise={setDetail}
+                onOpenConsumed={() => setOpenSkillId(null)}
+              />
+            )}
+          </>
+        )}
+
+        {tab === 'nutrition' && (
+          <NutritionView
+            profile={profile}
+            days={days}
+            targets={targets}
+            onUpdateTargets={(patch) => setTargets((current) => ({ ...current, ...patch }))}
+            onAddMeal={addMeal}
+            onUpdateMeal={updateMeal}
+            onDeleteMeal={deleteMeal}
+            onUpdateDay={updateDay}
+          />
+        )}
+
+        {tab === 'progress' && (
+          <>
+            <SubTabs
+              value={progressTab}
+              onChange={setProgressTab}
+              options={[
+                { id: 'dashboard', label: 'Dashboard' },
+                { id: 'calendar', label: 'Calendar' },
+                { id: 'records', label: 'Records' },
+                { id: 'history', label: 'History' },
+              ]}
+            />
+
+            {progressTab === 'dashboard' && (
+              <ProgressView
+                sessions={sessions}
+                workouts={workouts}
+                profile={profile}
+                records={records}
+                weight={weightLog}
+                overrides={overrides}
+                dismissed={dismissed}
+                onDismiss={dismiss}
+                onLogWeight={logWeight}
+                onDeleteWeight={deleteWeight}
+                onOpenExercise={setDetail}
+                onSetLevel={setOverride}
+                onGoTo={goToProgress}
+              />
+            )}
+
+            {progressTab === 'calendar' && (
+              <CalendarView
+                sessions={sessions}
+                workouts={workouts}
+                profile={profile}
+                onOpenSession={openSession}
+              />
+            )}
+
+            {progressTab === 'records' && (
+              <RecordsView
+                records={records}
+                sessions={sessions}
+                onDelete={deleteRecord}
+                onOpenExercise={setDetail}
+                onRequestAdd={() => setAddRecordOpen(true)}
+              />
+            )}
+
+            {progressTab === 'history' && (
+              <HistoryView
+                sessions={sessions}
+                workouts={workouts}
+                profile={profile}
+                streak={streak}
+                onOpenSession={openSession}
+              />
+            )}
+          </>
+        )}
+
+        {tab === 'profile' && (
+          <ProfileView
+            profile={profile}
+            theme={theme}
+            onTheme={setTheme}
+            onUpdate={updateProfile}
+            onReset={resetAllData}
+            datasetSizes={[
+              { label: 'Saved exercises', count: ids.length },
+              { label: 'Workouts', count: workouts.length },
+              { label: 'Sessions', count: sessions.length },
+              { label: 'Records', count: records.length },
+              { label: 'Nutrition days', count: days.length },
+              { label: 'Weight entries', count: weightLog.length },
+              { label: 'Skill stages', count: skillProgress.length },
+              { label: 'Level overrides', count: Object.keys(overrides).length },
+            ]}
+          />
+        )}
+      </main>
+
+      {detail && (
+        <ExerciseDetail
+          exercise={detail}
+          saved={savedIds.has(detail.id)}
+          onToggleSave={toggle}
+          onClose={() => setDetail(null)}
+          onOpen={setDetail}
+        />
+      )}
+
+      {picker && (
+        <ExercisePicker
+          savedIds={savedIds}
+          presentIds={pickerPresentIds}
+          onPick={handlePick}
+          onClose={() => setPicker(null)}
+        />
+      )}
+
+      {addRecordOpen && (
+        <AddRecordSheet
+          best={(exerciseId, metric) => bestFor(records, exerciseId, metric)}
+          onAdd={(entry) => {
+            const counted = addRecord(entry)
+            notify(
+              counted
+                ? '🎉 Personal record saved — the old best is kept in history.'
+                : 'That did not beat your best, so nothing was changed.',
+            )
+            return counted
+          }}
+          onClose={() => setAddRecordOpen(false)}
+        />
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="animate-pop fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[92%] rounded-xl border border-ink-600 bg-ink-900 px-4 py-2.5 text-center text-xs font-medium text-mist-100 shadow-lg md:bottom-6"
+        >
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Shared sub-navigation ──────────────────────────────────────────────── */
+
+function SubTabs<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T
+  onChange: (next: T) => void
+  options: { id: T; label: string; dot?: boolean }[]
+}) {
+  return (
+    <div
+      role="tablist"
+      className="scrollbar-slim mb-4 flex gap-1 overflow-x-auto border-b border-ink-700 pb-3"
+    >
+      {options.map((option) => {
+        const active = option.id === value
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(option.id)}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+              active
+                ? 'bg-brand-500/18 text-brand-300 ring-1 ring-brand-400/35'
+                : 'bg-ink-850/70 text-mist-400 hover:bg-ink-800 hover:text-mist-100'
+            }`}
+          >
+            {option.label}
+            {option.dot ? (
+              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-lime-glow align-middle" />
+            ) : null}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+
