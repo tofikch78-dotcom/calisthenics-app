@@ -15,6 +15,10 @@ export function startSession(
     targetReps: item.reps,
     targetHoldSec: item.holdSec,
     targetWeight: item.weight,
+    // Carried over so the rest timer knows what the workout prescribed. Without
+    // this the value only existed on the template and was gone the moment the
+    // session started.
+    targetRestSec: item.restSec,
     sets: Array.from({ length: Math.max(1, item.sets) }, (): LoggedSet => ({
       reps: item.reps,
       holdSec: item.holdSec,
@@ -59,6 +63,7 @@ export function addSessionItem(
     targetSets: exercise.dosage.sets,
     targetReps: exercise.dosage.reps,
     targetHoldSec: exercise.dosage.holdSec,
+    targetRestSec: exercise.dosage.restSec,
     sets: Array.from({ length: Math.max(1, exercise.dosage.sets) }, (): LoggedSet => ({
       reps: exercise.dosage.reps,
       holdSec: exercise.dosage.holdSec,
@@ -68,36 +73,24 @@ export function addSessionItem(
   }
 }
 
-/** Adds another working set to an exercise, pre-filled from the last one. */
-export function appendSet(item: SessionItem): SessionItem {
-  const previous = item.sets[item.sets.length - 1]
-  return {
-    ...item,
-    targetSets: item.sets.length + 1,
-    sets: [
-      ...item.sets,
-      {
-        reps: item.targetReps,
-        holdSec: item.targetHoldSec,
-        weight: item.targetWeight ?? previous?.weight,
-        status: 'pending',
-      },
-    ],
-  }
-}
+/* ── Session editing ──────────────────────────────────────────────────────── */
 
-/** Keeps the item status honest as sets are ticked. */
-export function recomputeItemStatus(item: SessionItem): SessionItem {
-  const done = item.sets.filter((set) => set.status === 'done').length
-  const skipped = item.sets.filter((set) => set.status === 'skipped').length
-  let status = item.status
-  if (item.status !== 'skipped') {
-    if (item.sets.length && done + skipped >= item.sets.length) status = done ? 'completed' : 'skipped'
-    else if (done > 0 || skipped > 0) status = 'in-progress'
-    else status = 'not-started'
-  }
-  return { ...item, status }
-}
+/*
+ * The editing rules live in `session-edit` so they can be exercised without
+ * React or storage. Re-exported here because `session` is where the rest of the
+ * session vocabulary already lives, and callers should not have to know which of
+ * the two files a given helper came from.
+ */
+export {
+  appendSet,
+  dropLastSet,
+  mapSession,
+  patchSessionItem,
+  patchSessionSet,
+  recomputeItemStatus,
+  setItemSkipped,
+  toggleSetStatus,
+} from './session-edit'
 
 export const ITEM_STATUS_META: Record<
   SessionItem['status'],

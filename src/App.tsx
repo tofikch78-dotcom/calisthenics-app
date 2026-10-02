@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BottomNav } from './components/BottomNav'
 import { CalendarView } from './components/CalendarView'
 import { ExerciseDetail } from './components/ExerciseDetail'
@@ -13,6 +13,7 @@ import { Onboarding } from './components/Onboarding'
 import { ProfileView } from './components/ProfileView'
 import { ProgressView } from './components/ProgressView'
 import { AddRecordSheet, RecordsView } from './components/RecordsView'
+import { SessionReview } from './components/SessionReview'
 import { SessionView } from './components/SessionView'
 import { SkillsView } from './components/SkillsView'
 import { WorkoutsView } from './components/WorkoutsView'
@@ -23,6 +24,7 @@ import { addSessionItem, emptySession, startSession } from './lib/session'
 import {
   bestFor,
   resetAllData,
+  useActiveSessionId,
   useDismissedSuggestions,
   useLevelOverrides,
   useMyExercises,
@@ -52,7 +54,7 @@ export default function App() {
 
   const { ids, savedIds, toggle, clear } = useMyExercises()
   const { workouts, saveWorkout, deleteWorkout, duplicateWorkout } = useWorkouts()
-  const { sessions, addSession, updateSession, deleteSession } = useSessions()
+  const { sessions, addSession, updateSession, editSession, deleteSession } = useSessions()
   const { records, addRecord, deleteRecord } = useRecords()
   const { days, updateDay, addMeal, updateMeal, deleteMeal } = useNutrition()
   const { targets, setTargets } = useNutritionTargets()
@@ -69,7 +71,11 @@ export default function App() {
 
   const [detail, setDetail] = useState<Exercise | null>(null)
   const [picker, setPicker] = useState<PickerTarget | null>(null)
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  // A finished session opened from History, read-only.
+  const [reviewSessionId, setReviewSessionId] = useState<string | null>(null)
+  // Persisted, so reopening the app lands back on the workout in progress
+  // instead of on Home with the work safely stored but nothing pointing at it.
+  const [activeSessionId, setActiveSessionId] = useActiveSessionId()
   const [openSkillId, setOpenSkillId] = useState<string | null>(null)
   const [addRecordOpen, setAddRecordOpen] = useState(false)
   const [seedExerciseIds, setSeedExerciseIds] = useState<string[]>([])
@@ -80,6 +86,28 @@ export default function App() {
   const liveSession = activeSession?.status === 'in-progress' ? activeSession : null
   const streak = useMemo(() => computeStreak(sessions, profile, workouts), [sessions, profile, workouts])
 
+  /**
+   * Keeps the tab on the workout while one is running.
+   *
+   * Recovery used to mean landing on Home and finding a Resume card, which is
+   * easy to miss mid-session and impossible if the session was started before
+   * midnight — Home and Today both only look at today's sessions. Reopening the
+   * app while a session is in progress now returns to it directly, and the
+   * elapsed clock is derived from `startedAt`, so the time worked before the
+   * reload is still counted.
+   */
+  const restoredForSession = useRef(false)
+  useEffect(() => {
+    if (!liveSession) {
+      restoredForSession.current = false
+      return
+    }
+    if (restoredForSession.current) return
+    restoredForSession.current = true
+    setWorkoutTab('today')
+    setTab('workout')
+  }, [liveSession])
+
   /* ── Actions ─────────────────────────────────────────────────────────── */
 
   const notify = useCallback((text: string) => {
@@ -87,14 +115,30 @@ export default function App() {
     window.setTimeout(() => setToast(null), 3400)
   }, [])
 
+  /**
+   * Opens a session.
+   *
+   * An in-progress one goes back into the runner. A finished one could not: the
+   * runner only ever rendered a live session, so tapping a workout in History
+   * used to drop the user on the Today tab with no sign of the session they
+   * asked for, and the per-set detail was unreachable. Those open as a
+   * read-only review sheet instead.
+   */
   const openSession = useCallback(
     (session: WorkoutSession) => {
-      setActiveSessionId(session.id)
-      setWorkoutTab('today')
-      setTab('workout')
+      if (session.status === 'in-progress') {
+        setReviewSessionId(null)
+        setActiveSessionId(session.id)
+        setWorkoutTab('today')
+        setTab('workout')
+        return
+      }
+      setReviewSessionId(session.id)
     },
-    [],
+    [setActiveSessionId],
   )
+
+  const reviewSession = sessions.find((session) => session.id === reviewSessionId) ?? null
 
   const startWorkout = useCallback(
     (workout: Workout) => {
@@ -108,7 +152,7 @@ export default function App() {
       setWorkoutTab('today')
       setTab('workout')
     },
-    [addSession, notify],
+    [addSession, notify, setActiveSessionId],
   )
 
   const startFreestyle = useCallback(() => {
@@ -117,7 +161,7 @@ export default function App() {
     setActiveSessionId(session.id)
     setWorkoutTab('today')
     setTab('workout')
-  }, [addSession])
+  }, [addSession, setActiveSessionId])
 
   const finishSession = useCallback(
     (session: WorkoutSession) => {
@@ -153,7 +197,7 @@ export default function App() {
         notify(`🎉 ${beaten === 1 ? 'New personal record' : `${beaten} new personal records`} — ${finished.workoutName} saved.`)
       else notify(`${finished.workoutName} saved as ${finished.status}.`)
     },
-    [addRecord, notify, updateSession],
+    [addRecord, notify, setActiveSessionId, updateSession],
   )
 
   const discardSession = useCallback(
@@ -162,7 +206,7 @@ export default function App() {
       setActiveSessionId(null)
       notify('Session discarded — nothing was saved.')
     },
-    [deleteSession, notify],
+    [deleteSession, notify, setActiveSessionId],
   )
 
   const goToProgress = useCallback((target: ProgressTab) => {
@@ -207,12 +251,14 @@ export default function App() {
   const handlePick = useCallback(
     (exercise: Exercise) => {
       if (!picker) return
-      const session = sessions.find((entry) => entry.id === picker.sessionId)
-      if (!session) return
-      updateSession(session.id, { items: [...session.items, addSessionItem(exercise)] })
+      const sessionId = picker.sessionId
+      // Applied inside the state updater, off the stored session: picking an
+      // exercise must never be computed from a list that a concurrent edit has
+      // already replaced, or the new exercise overwrites the edit.
+      editSession(sessionId, (current) => ({ items: [...current.items, addSessionItem(exercise)] }))
       notify(`Added ${exercise.name} to the session.`)
     },
-    [picker, sessions, updateSession, notify],
+    [editSession, notify, picker],
   )
 
   /* ── Onboarding gate ─────────────────────────────────────────────────── */
@@ -272,7 +318,7 @@ export default function App() {
               (liveSession ? (
                 <SessionView
                   session={liveSession}
-                  onChange={(patch) => updateSession(liveSession.id, patch)}
+                  onEdit={(change) => editSession(liveSession.id, change)}
                   onFinish={() => finishSession(liveSession)}
                   onDiscard={() => discardSession(liveSession)}
                   onOpenExercise={setDetail}
@@ -480,6 +526,14 @@ export default function App() {
           presentIds={pickerPresentIds}
           onPick={handlePick}
           onClose={() => setPicker(null)}
+        />
+      )}
+
+      {reviewSession && (
+        <SessionReview
+          session={reviewSession}
+          onClose={() => setReviewSessionId(null)}
+          onOpenExercise={setDetail}
         />
       )}
 

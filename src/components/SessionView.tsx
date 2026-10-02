@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getExercise } from '../data'
 import { formatDuration, relativeDay } from '../lib/dates'
+import { formatRest } from '../lib/search'
+import { REST_ADJUST_SECONDS, prescribedRest, useRestTimer } from '../lib/rest-timer'
 import { sessionStats } from '../lib/stats'
 import {
   FEELINGS,
   ITEM_STATUS_META,
   appendSet,
+  dropLastSet,
   elapsedSeconds,
-  recomputeItemStatus,
+  patchSessionItem,
+  patchSessionSet,
+  setItemSkipped,
+  toggleSetStatus,
 } from '../lib/session'
 import type { Exercise, LoggedSet, SessionItem, WorkoutSession } from '../types'
 import { ExerciseAnimation } from './ExerciseAnimation'
@@ -28,7 +34,8 @@ import { DifficultyBadge, MusclePill } from './ui'
 
 export interface SessionViewProps {
   session: WorkoutSession
-  onChange: (patch: Partial<WorkoutSession>) => void
+  /** Edits the session from a function of its *stored* state. */
+  onEdit: (change: (session: WorkoutSession) => Partial<WorkoutSession> | null) => void
   onFinish: () => void
   onDiscard: () => void
   onOpenExercise: (exercise: Exercise) => void
@@ -37,7 +44,7 @@ export interface SessionViewProps {
 
 export function SessionView({
   session,
-  onChange,
+  onEdit,
   onFinish,
   onDiscard,
   onOpenExercise,
@@ -45,6 +52,7 @@ export function SessionView({
 }: SessionViewProps) {
   const [now, setNow] = useState(() => Date.now())
   const [confirmFinish, setConfirmFinish] = useState(false)
+  const rest = useRestTimer(0)
 
   const running = session.status === 'in-progress'
   useEffect(() => {
@@ -56,28 +64,69 @@ export function SessionView({
   const stats = sessionStats(session)
   const elapsed = elapsedSeconds(session, now)
 
-  const patchItem = (itemId: string, patch: Partial<SessionItem>) =>
-    onChange({
-      items: session.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
-    })
+  /**
+   * Every edit is expressed against the stored session rather than against the
+   * `session` prop.
+   *
+   * This screen renders every exercise at once and a tap can easily land before
+   * React has re-rendered for the previous one. Reading the rendered props here
+   * would hand the updater an out-of-date copy, so two quick taps collapsed into
+   * one and a set silently stopped being recorded — the single most important
+   * thing this screen does.
+   */
+  const patchItem = (itemId: string, change: (item: SessionItem) => SessionItem) =>
+    onEdit((current) => patchSessionItem(current, itemId, change))
 
-  const patchSet = (itemId: string, setIndex: number, patch: Partial<LoggedSet>) =>
-    onChange({
-      items: session.items.map((item) =>
-        item.id === itemId
-          ? recomputeItemStatus({
-              ...item,
-              sets: item.sets.map((set, index) => (index === setIndex ? { ...set, ...patch } : set)),
-            })
-          : item,
-      ),
-    })
+  const patchSet = (itemId: string, setIndex: number, change: (set: LoggedSet) => LoggedSet) =>
+    onEdit((current) => patchSessionSet(current, itemId, setIndex, change))
+
+  /**
+   * Starts the prescribed rest whenever a working set is newly ticked.
+   *
+   * This watches the *result* of the edit rather than firing from inside it. A
+   * React state updater has to be pure — React may call it more than once, and it
+   * runs during the update rather than after it — so kicking the timer off from
+   * there made the deadline depend on how many times the updater happened to
+   * run. React can also replay updaters when a component is mounted twice in
+   * development, which is exactly how a rest timer starts twice. Diffing the
+   * done-set pattern after the fact cannot be replayed out of order, so the
+   * countdown starts once per newly completed set and not at all otherwise:
+   * un-ticking a set, adding a set, skipping one, or reopening the app mid-rest
+   * all leave it alone.
+   */
+  const donePattern = session.items.flatMap((item) => item.sets.map((set) => set.status === 'done'))
+  // A string key rather than the array itself: it changes only when a set is
+  // actually ticked or un-ticked, so the effect below runs on real changes
+  // instead of on every keystroke in any field on the screen.
+  const doneKey = donePattern.map((done) => (done ? '1' : '0')).join('')
+  const seenKey = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = seenKey.current
+    seenKey.current = doneKey
+    // First pass after mount is the baseline, not a newly finished set.
+    if (previous === null) return
+
+    let cursor = 0
+    for (const item of session.items) {
+      for (const set of item.sets) {
+        if (set.status === 'done' && previous[cursor] !== '1') {
+          const restSec = prescribedRest(item.targetRestSec)
+          if (restSec) rest.start(restSec)
+          return
+        }
+        cursor += 1
+      }
+    }
+    // `doneKey` stands in for `session.items`: it changes exactly when a set
+    // status does, which is the only thing this reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneKey])
 
   const toggleSet = (itemId: string, setIndex: number) =>
-    patchSet(itemId, setIndex, { status: session.items.find((i) => i.id === itemId)?.sets[setIndex].status === 'done' ? 'pending' : 'done' })
+    patchSet(itemId, setIndex, toggleSetStatus)
 
   const removeItem = (itemId: string) =>
-    onChange({ items: session.items.filter((item) => item.id !== itemId) })
+    onEdit((current) => ({ items: current.items.filter((item) => item.id !== itemId) }))
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -93,7 +142,7 @@ export function SessionView({
           <div className="min-w-0 flex-1">
             <input
               value={session.workoutName}
-              onChange={(event) => onChange({ workoutName: event.target.value })}
+              onChange={(event) => onEdit(() => ({ workoutName: event.target.value }))}
               aria-label="Workout name"
               className="min-h-11 w-full truncate bg-transparent text-base font-bold text-white focus:outline-none"
             />
@@ -117,6 +166,22 @@ export function SessionView({
           </button>
         </div>
         <ProgressBar value={stats.completion} className="mt-3" tone={stats.completion === 100 ? 'ok' : 'brand'} label="Session completion" />
+
+        {/*
+          * Rest lives in the pinned header rather than inside each exercise card,
+          * so it stays put and stays operable while the user scrolls down the
+          * list, adds a set or opens an exercise detail. It is pinned together
+          * with the header rather than in a sticky bar of its own because such a
+          * bar cannot be offset below a header whose height changes with the
+          * progress bar and the workout name — pinning the two together is what
+          * actually keeps the countdown on screen halfway down a long workout.
+          *
+          * It adds no height when there is nothing to count down. It is driven
+          * off absolute deadlines and a single interval, so scrolling this list,
+          * re-rendering the screen or switching exercises cannot restart it or
+          * leave a second timer running.
+          */}
+        <RestTimerBar rest={rest} />
       </div>
 
       {session.items.length === 0 ? (
@@ -166,7 +231,7 @@ export function SessionView({
             <Chip
               key={feeling}
               pressed={session.feel === feeling}
-              onClick={() => onChange({ feel: session.feel === feeling ? undefined : feeling })}
+              onClick={() => onEdit(() => ({ feel: session.feel === feeling ? undefined : feeling }))}
             >
               {feeling}
             </Chip>
@@ -176,7 +241,7 @@ export function SessionView({
           className="mt-3"
           rows={3}
           value={session.notes ?? ''}
-          onChange={(event) => onChange({ notes: event.target.value })}
+          onChange={(event) => onEdit(() => ({ notes: event.target.value }))}
           placeholder="Dips felt easy today. Legs were tired…"
         />
       </Card>
@@ -236,6 +301,82 @@ export function SessionView({
   )
 }
 
+/**
+ * The rest countdown.
+ *
+ * `useRestTimer` owns exactly one interval and only runs it while counting, so
+ * this bar can appear and disappear freely without leaking timers. Start, pause,
+ * reset and +30s are all plain state transitions over an absolute deadline,
+ * which is what keeps the count honest across re-renders.
+ */
+function RestTimerBar({ rest }: { rest: ReturnType<typeof useRestTimer> }) {
+  // Nothing to show until a set has actually started a rest.
+  if (!rest.state.totalSec) return null
+
+  const minutes = Math.floor(rest.remaining / 60)
+  const seconds = rest.remaining % 60
+  const label = `${minutes}:${String(seconds).padStart(2, '0')}`
+  const tone = rest.finished ? 'border-lime-glow/45' : 'border-ink-600'
+
+  return (
+    <div
+      className={`mt-3 flex items-center gap-2.5 rounded-2xl border bg-ink-850/80 px-3 py-2.5 ${tone}`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-medium tracking-wider text-mist-400 uppercase">
+          {rest.finished ? 'Rest over' : 'Rest'}
+        </p>
+        <p
+          className={`tnum text-xl leading-none font-bold ${rest.finished ? 'text-lime-glow' : 'text-mist-100'}`}
+          // Announced politely: it changes every second, so it must not
+          // interrupt whatever the user is doing.
+          aria-live="off"
+        >
+          {label}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 gap-1.5">
+        <button
+          type="button"
+          onClick={() => rest.adjust(REST_ADJUST_SECONDS)}
+          className="min-h-11 rounded-lg border border-ink-600 px-2.5 text-[11px] font-semibold text-mist-200 transition hover:border-brand-400/50"
+        >
+          +{REST_ADJUST_SECONDS}s
+        </button>
+        {rest.running ? (
+          <button
+            type="button"
+            onClick={rest.pause}
+            aria-label="Pause rest timer"
+            className="min-h-11 rounded-lg border border-ink-600 px-2.5 text-[11px] font-semibold text-mist-200 transition hover:border-brand-400/50"
+          >
+            Pause
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={rest.resume}
+            disabled={rest.finished}
+            aria-label="Resume rest timer"
+            className="min-h-11 rounded-lg border border-ink-600 px-2.5 text-[11px] font-semibold text-mist-200 transition hover:border-brand-400/50 disabled:opacity-40"
+          >
+            Resume
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => rest.reset()}
+          aria-label="Reset rest timer"
+          className="min-h-11 rounded-lg border border-ink-600 px-2.5 text-[11px] font-semibold text-mist-200 transition hover:border-rose-glow/40 hover:text-rose-glow"
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SessionItemCard({
   item,
   onToggleSet,
@@ -246,12 +387,17 @@ function SessionItemCard({
 }: {
   item: SessionItem
   onToggleSet: (itemId: string, setIndex: number) => void
-  onPatchSet: (itemId: string, setIndex: number, patch: Partial<LoggedSet>) => void
-  onPatch: (itemId: string, patch: Partial<SessionItem>) => void
+  onPatchSet: (itemId: string, setIndex: number, change: (set: LoggedSet) => LoggedSet) => void
+  onPatch: (itemId: string, change: (item: SessionItem) => SessionItem) => void
   onRemove: (itemId: string) => void
   onOpenExercise: (exercise: Exercise) => void
 }) {
   const [playing, setPlaying] = useState(true)
+  // The text area is a controlled input, so it needs a local draft while it is
+  // being typed into. The value is written through to the session on every
+  // keystroke as well, so the draft is only ever a fast path for the caret - if
+  // it is lost the field falls back to the stored note and nothing is lost.
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({})
   const exercise = getExercise(item.exerciseId)
   if (!exercise) return null
 
@@ -320,7 +466,20 @@ function SessionItemCard({
             Target {item.targetSets} ×{' '}
             {isHold ? `${item.targetHoldSec ?? 0}s` : `${item.targetReps ?? 0} reps`}
             {isWeighted ? ` @ ${item.targetWeight ?? 0}kg` : ''} · {done}/{item.sets.length} sets
+            {/*
+                * The prescribed rest, shown next to the rest of the target. It
+                * used to be dropped when the session started, so the timer had
+                * nothing to count and the number was invisible even though the
+                * builder used it to estimate the session length.
+              */}
+            {item.targetRestSec ? ` · rest ${formatRest(item.targetRestSec)}` : ''}
           </p>
+          {item.note && (
+            <p className="mt-1 flex items-start gap-1.5 text-[11px] text-mist-400">
+              <IconNote className="mt-0.5 h-3 w-3 shrink-0" />
+              <span className="min-w-0">{item.note}</span>
+            </p>
+          )}
         </div>
 
         <button
@@ -340,7 +499,12 @@ function SessionItemCard({
               type="button"
               onClick={() => onToggleSet(item.id, index)}
               aria-pressed={set.status === 'done'}
-              aria-label={`Set ${index + 1} ${set.status === 'done' ? 'done' : 'not done'}`}
+              // "Set 1 of 8" rather than a bare "Set 1": a screen reader
+              // announcing an unnumbered set tells the user nothing about which
+              // exercise or which position they are actually on.
+              aria-label={`${exercise.name} set ${index + 1} of ${item.sets.length}, ${
+                set.status === 'done' ? 'done' : set.status === 'skipped' ? 'skipped' : 'not done'
+              }`}
               className={`grid size-11 shrink-0 place-items-center rounded-lg border text-xs font-semibold transition ${
                 set.status === 'done'
                   ? 'border-lime-glow/40 bg-lime-glow/20 text-lime-glow'
@@ -358,9 +522,12 @@ function SessionItemCard({
                 inputMode="numeric"
                 value={set.holdSec ?? ''}
                 onChange={(event) =>
-                  onPatchSet(item.id, index, { holdSec: event.target.value === '' ? undefined : Number(event.target.value) })
+                  onPatchSet(item.id, index, (current) => ({
+                    ...current,
+                    holdSec: event.target.value === '' ? undefined : Number(event.target.value),
+                  }))
                 }
-                aria-label={`Set ${index + 1} hold seconds`}
+                aria-label={`${exercise.name} set ${index + 1} hold seconds`}
                 className="tnum min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
               />
             ) : (
@@ -369,9 +536,12 @@ function SessionItemCard({
                 inputMode="numeric"
                 value={set.reps ?? ''}
                 onChange={(event) =>
-                  onPatchSet(item.id, index, { reps: event.target.value === '' ? undefined : Number(event.target.value) })
+                  onPatchSet(item.id, index, (current) => ({
+                    ...current,
+                    reps: event.target.value === '' ? undefined : Number(event.target.value),
+                  }))
                 }
-                aria-label={`Set ${index + 1} reps`}
+                aria-label={`${exercise.name} set ${index + 1} reps`}
                 className="tnum min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
               />
             )}
@@ -385,17 +555,25 @@ function SessionItemCard({
               min={0}
               value={set.weight ?? ''}
               onChange={(event) =>
-                onPatchSet(item.id, index, { weight: event.target.value === '' ? undefined : Number(event.target.value) })
+                onPatchSet(item.id, index, (current) => ({
+                  ...current,
+                  weight: event.target.value === '' ? undefined : Number(event.target.value),
+                }))
               }
-              aria-label={`Set ${index + 1} weight in kilograms`}
+              aria-label={`${exercise.name} set ${index + 1} weight in kilograms`}
               placeholder="kg"
               className="tnum ml-auto min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
             />
 
             <button
               type="button"
-              onClick={() => onPatchSet(item.id, index, { status: set.status === 'skipped' ? 'pending' : 'skipped' })}
-              aria-label={`${set.status === 'skipped' ? 'Unskip' : 'Skip'} set ${index + 1}`}
+              onClick={() =>
+                onPatchSet(item.id, index, (current) => ({
+                  ...current,
+                  status: current.status === 'skipped' ? ('pending' as const) : ('skipped' as const),
+                }))
+              }
+              aria-label={`${set.status === 'skipped' ? 'Unskip' : 'Skip'} ${exercise.name} set ${index + 1}`}
               title={set.status === 'skipped' ? 'Unskip set' : 'Skip set'}
               className={`grid size-11 shrink-0 place-items-center rounded-md transition ${
                 set.status === 'skipped' ? 'text-rose-glow' : 'text-mist-500 hover:text-mist-300'
@@ -410,7 +588,7 @@ function SessionItemCard({
       <div className="mt-3 flex flex-wrap gap-1.5 border-t border-ink-700 pt-2.5">
         <button
           type="button"
-          onClick={() => onPatch(item.id, appendSet(item))}
+          onClick={() => onPatch(item.id, appendSet)}
           className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
         >
           + Set
@@ -418,21 +596,22 @@ function SessionItemCard({
         {item.sets.length > 1 && (
           <button
             type="button"
-            onClick={() =>
-              onPatch(
-                item.id,
-                recomputeItemStatus({ ...item, sets: item.sets.slice(0, -1), targetSets: Math.max(1, item.sets.length - 1) }),
-              )
-            }
+            onClick={() => onPatch(item.id, dropLastSet)}
             className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
           >
             − Set
           </button>
         )}
+        {/*
+            * Skipping is reversible and never destructive: it only flips set
+            * statuses, so every rep, hold and weight already entered survives an
+            * accidental skip. Un-skipping puts them back as pending rather than
+            * rewriting the numbers.
+          */}
         {item.status !== 'skipped' ? (
           <button
             type="button"
-            onClick={() => onPatch(item.id, { status: 'skipped', sets: item.sets.map((set) => ({ ...set, status: 'skipped' as const })) })}
+            onClick={() => onPatch(item.id, (current) => setItemSkipped(current, true))}
             className="ml-auto min-h-11 rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-rose-glow"
           >
             Skip exercise
@@ -440,13 +619,32 @@ function SessionItemCard({
         ) : (
           <button
             type="button"
-            onClick={() => onPatch(item.id, { status: 'not-started', sets: item.sets.map((set) => ({ ...set, status: 'pending' as const })) })}
+            onClick={() => onPatch(item.id, (current) => setItemSkipped(current, false))}
             className="ml-auto min-h-11 rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-brand-300"
           >
             Unskip exercise
           </button>
         )}
       </div>
+
+      {/*
+          * A note can be written mid-session, per exercise. The workout's own
+          * note is shown above when it exists; this is for the coaching cue that
+          * only makes sense mid-set, and it is stored on the item so it survives
+          * into history.
+        */}
+      <TextArea
+        rows={2}
+        value={noteDraft[item.id] ?? item.note ?? ''}
+        onChange={(event) => {
+          const value = event.target.value
+          setNoteDraft((current) => ({ ...current, [item.id]: value }))
+          onPatch(item.id, (current) => ({ ...current, note: value || undefined }))
+        }}
+        placeholder={`Note for ${exercise.name}…`}
+        aria-label={`Note for ${exercise.name}`}
+        className="mt-2.5 text-xs"
+      />
     </li>
   )
 }

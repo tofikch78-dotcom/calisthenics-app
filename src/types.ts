@@ -167,6 +167,8 @@ export interface SessionItem {
   targetReps?: number
   targetHoldSec?: number
   targetWeight?: number
+  /** Prescribed rest between working sets, in seconds. Drives the rest timer. */
+  targetRestSec?: number
   sets: LoggedSet[]
   status: ItemStatus
   note?: string

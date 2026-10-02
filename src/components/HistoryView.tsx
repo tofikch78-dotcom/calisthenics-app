@@ -40,9 +40,15 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
   )
 
   const entries = useMemo(() => history(sessions), [sessions])
+  /**
+   * "Month" used to filter on `weekStart` as well, so it listed exactly what
+   * "Week" listed — the two buttons were indistinguishable and the whole month
+   * of history was unreachable. It means the last 30 days.
+   */
   const filtered = useMemo(() => {
     if (range === 'all') return entries
-    return entries.filter((entry) => entry.session.date >= weekStart && entry.session.date <= today)
+    const from = range === 'week' ? weekStart : addDays(today, -29)
+    return entries.filter((entry) => entry.session.date >= from && entry.session.date <= today)
   }, [entries, range, weekStart, today])
 
   return (
@@ -123,6 +129,14 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
                 key={id}
                 type="button"
                 onClick={() => setRange(id)}
+                aria-pressed={range === id}
+                title={
+                  id === 'week'
+                    ? 'This week only'
+                    : id === 'month'
+                      ? 'The last 30 days'
+                      : 'Every session ever logged'
+                }
                 className={`min-h-11 rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
                   range === id ? 'bg-brand-500/18 text-brand-300' : 'bg-ink-800/70 text-mist-400 hover:text-mist-100'
                 }`}

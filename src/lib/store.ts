@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { reconcile } from './reconcile'
 import type {
   Difficulty,
   Exercise,
@@ -27,6 +28,7 @@ const LEVELS_KEY = `${PREFIX}levels`
 const DISMISSED_KEY = `${PREFIX}dismissed-suggestions`
 const PROFILE_KEY = `${PREFIX}profile`
 const THEME_KEY = `${PREFIX}theme`
+const ACTIVE_SESSION_KEY = `${PREFIX}active-session`
 
 /** Every key the app owns, used by the export / import / reset flow. */
 export const STORAGE_KEYS = [
@@ -42,6 +44,7 @@ export const STORAGE_KEYS = [
   DISMISSED_KEY,
   PROFILE_KEY,
   THEME_KEY,
+  ACTIVE_SESSION_KEY,
 ] as const
 
 export function readStored<T>(key: string, fallback: T): T {
@@ -56,37 +59,8 @@ export function readStored<T>(key: string, fallback: T): T {
   }
 }
 
-/**
- * Fits a value read back out of storage into the shape the app expects.
- *
- * All of this app's data lives on the device and nowhere else, so a value that
- * does not fit its expected shape is not a cosmetic problem: there is no
- * server copy to fall back to and no account to re-sync from, and the usual
- * result is an unhandled render error and a blank window the user cannot get
- * out of. Real ways that happens:
- *
- *   - a build that adds a field, and a profile written by the build before it
- *   - an imported or hand-edited backup file
- *   - a half-written value from another tab
- *
- * Arrays are held to actually being arrays, objects get the defaults filled in
- * underneath whatever was stored, and a scalar has to keep its type. Anything
- * unrecognisable falls back to the default, so the app always starts.
- */
-function reconcile<T>(stored: unknown, fallback: T): T {
-  if (Array.isArray(fallback)) return (Array.isArray(stored) ? stored : fallback) as T
-
-  const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-
-  if (isPlainObject(fallback)) {
-    // A non-object stored value (null, an array, a stray number) carries no
-    // usable fields, so the defaults are better than whatever it claimed.
-    return (isPlainObject(stored) ? { ...fallback, ...stored } : fallback) as T
-  }
-
-  return (typeof stored === typeof fallback ? (stored as T) : fallback)
-}
+/* Re-exported so this stays the one import site for everything storage-shaped. */
+export { reconcile } from './reconcile'
 
 /**
  * State that mirrors itself into localStorage and stays in sync with other
@@ -336,12 +310,76 @@ export function useSessions() {
     [setSessions],
   )
 
+  /**
+   * Edits one session from a function of its current value.
+   *
+   * This is the only safe way to change a live session. The screen renders every
+   * exercise at once and the updater runs synchronously inside the state
+   * setter, so a tap that arrives before React has re-rendered still sees the
+   * result of the previous tap. A patch computed from the rendered props is
+   * already stale by then, and two quick edits collapse into one — which is how
+   * a set silently stopped being recorded.
+   */
+  const editSession = useCallback(
+    (
+      id: string,
+      change: (session: WorkoutSession) => Partial<Omit<WorkoutSession, 'id' | 'startedAt'>> | null,
+    ) => {
+      setSessions((current) =>
+        current.map((session) => {
+          if (session.id !== id) return session
+          const patch = change(session)
+          return patch ? { ...session, ...patch } : session
+        }),
+      )
+    },
+    [setSessions],
+  )
+
   const deleteSession = useCallback(
     (id: string) => setSessions((current) => current.filter((session) => session.id !== id)),
     [setSessions],
   )
 
-  return { sessions, addSession, updateSession, deleteSession }
+  return { sessions, addSession, updateSession, editSession, deleteSession }
+}
+
+/* ── Which session is on screen ───────────────────────────────────────────── */
+
+/**
+ * The id of the session the user was last working on.
+ *
+ * The session itself was always in storage, but the *pointer* to it lived only
+ * in React state, so a refresh left the work safely written down and the app
+ * with no way back to it: no badge, no auto-resume, and — for a session started
+ * before midnight — nothing on Home or Today offering it at all. Persisting the
+ * pointer is what makes closing and reopening the app resume the workout rather
+ * than merely avoid losing it.
+ *
+ * A stale id is self-healing: the effect below drops it once the session it
+ * named is gone or finished, so this can never strand the app on a session that
+ * does not exist.
+ */
+export function useActiveSessionId() {
+  const [id, setId] = usePersistentState<string | null>(ACTIVE_SESSION_KEY, null)
+
+  /*
+   * A stale id is dropped: if the session it named has been finished, discarded
+   * or removed — here, in another tab, or by a restored backup — the pointer is
+   * cleared so the app cannot open on a session that does not exist.
+   *
+   * `setId` is a `useState` setter, so its identity is stable for the lifetime of
+   * the component and naming it as a dependency would be noise; the comment keeps
+   * the omission deliberate rather than an oversight.
+   */
+  useEffect(() => {
+    if (!id) return
+    const raw = readStored<WorkoutSession[]>(SESSIONS_KEY, [])
+    const session = Array.isArray(raw) ? raw.find((entry) => entry?.id === id) : undefined
+    if (!session || session.status !== 'in-progress') setId(null)
+  }, [id, setId])
+
+  return [id, setId] as const
 }
 
 /* ── Personal records ───────────────────────────────────────────────────── */
