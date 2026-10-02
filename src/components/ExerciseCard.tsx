@@ -47,9 +47,17 @@ export function ExerciseCard({ exercise, saved, onToggleSave, onOpen }: Exercise
                 playing ? `Pause the ${exercise.name} animation` : `Play the ${exercise.name} animation`
               }
               aria-pressed={playing}
-              className="absolute right-0.5 bottom-0.5 z-10 grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-[7px] leading-none text-mist-300 backdrop-blur transition hover:border-brand-400/60 hover:text-brand-300"
+              /*
+               * A 16px dot is impossible to hit accurately with a thumb, so the
+               * tap target is grown well past the visible dot. The dot is drawn
+               * with an inset ring and a transparent centre so it keeps its
+               * small, unobtrusive look while the button stays thumb-sized.
+               */
+              className="absolute -right-2.5 -bottom-2.5 z-10 grid size-11 place-items-center rounded-full text-mist-300 transition hover:text-brand-300"
             >
-              {playing ? '❚❚' : '▶'}
+              <span className="grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-[7px] leading-none backdrop-blur transition group-hover:border-brand-400/60">
+                {playing ? '❚❚' : '▶'}
+              </span>
             </button>
           )}
         </div>
@@ -98,7 +106,7 @@ export function ExerciseCard({ exercise, saved, onToggleSave, onOpen }: Exercise
             type="button"
             onClick={() => onToggleSave(exercise.id)}
             aria-pressed={saved}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+            className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
               saved
                 ? 'bg-lime-glow/15 text-lime-glow ring-1 ring-lime-glow/35 hover:bg-lime-glow/20'
                 : 'border border-ink-600 text-mist-300 hover:border-brand-400/50 hover:text-brand-300'

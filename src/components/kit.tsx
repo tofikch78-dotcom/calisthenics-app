@@ -289,7 +289,7 @@ export function Chip({
       onClick={onClick}
       aria-pressed={pressed}
       title={title}
-      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+      className={`min-h-11 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
         pressed
           ? 'bg-brand-500/18 text-brand-300 ring-1 ring-brand-400/40'
           : 'bg-ink-800/70 text-mist-300 ring-1 ring-ink-600/70 hover:ring-ink-500 hover:text-mist-100'
@@ -475,7 +475,7 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.id)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+            className={`min-h-11 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
               active ? 'bg-brand-500/18 text-brand-300' : 'text-mist-400 hover:text-mist-100'
             }`}
           >
@@ -543,8 +543,14 @@ export function Sheet({
         if (event.target === event.currentTarget) onClose()
       }}
     >
+      {/*
+        `dvh` tracks the real viewport as the mobile URL bar collapses, so the
+        sheet never hangs below the fold. The plain `vh` is the fallback for
+        browsers without dynamic viewport units. On phones it is a bottom
+        sheet (`items-end`), which is the one-handed-reachable presentation.
+      */}
       <div
-        className={`animate-rise flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-3xl border border-ink-600 bg-ink-900 sm:rounded-3xl ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}
+        className={`animate-rise flex max-h-[88vh] max-h-[88dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-ink-600 bg-ink-900 sm:rounded-3xl ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}
       >
         <div className="flex items-center justify-between gap-3 border-b border-ink-700 px-4 py-3">
           <h2 className="text-sm font-semibold text-mist-100">{title}</h2>
@@ -552,15 +558,29 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-2 text-mist-400 transition hover:bg-ink-800 hover:text-white"
+            className="-mr-1 rounded-lg p-2 text-mist-400 transition hover:bg-ink-800 hover:text-white"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={base} aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" />
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 scrollbar-slim">{children}</div>
-        {footer ? <div className="border-t border-ink-700 px-4 py-3">{footer}</div> : null}
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 scrollbar-slim">{children}</div>
+        {/*
+          The footer's bottom padding keeps the primary action clear of the
+          Android gesture bar and the iPhone home indicator, while preserving
+          the same 0.75rem breathing room when there is no inset. Done inline
+          because Tailwind cannot add a calc() on top of an arbitrary value
+          here without generating a one-off class.
+        */}
+        {footer ? (
+          <div
+            className="border-t border-ink-700 px-4 pt-3"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)' }}
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   )

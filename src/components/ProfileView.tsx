@@ -3,6 +3,8 @@ import { EQUIPMENT, LIBRARY_STATS } from '../data'
 import { downloadBackup, formatBytes, readFileAsText, restoreBackup, storageFootprint } from '../lib/backup'
 import { DIET_LABEL, autoTargets, goalLabel } from '../lib/nutrition'
 import { Onboarding } from './Onboarding'
+import { InstallCard } from './InstallCard'
+import { OfflineReadinessCard } from './OfflineReadinessCard'
 import {
   Card,
   IconDownload,
@@ -103,7 +105,7 @@ export function ProfileView({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
           >
             <IconGear className="h-3.5 w-3.5" /> Edit profile
           </button>
@@ -187,6 +189,10 @@ export function ProfileView({
         </p>
       </Card>
 
+      <InstallCard />
+
+      <OfflineReadinessCard />
+
       <Card>
         <h3 className="text-sm font-semibold text-mist-100">Backup &amp; restore</h3>
         <p className="mt-0.5 text-xs text-mist-400">
@@ -228,7 +234,7 @@ export function ProfileView({
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-ink-600 px-3 py-2.5 text-xs font-semibold text-mist-200 transition hover:border-brand-400/40 hover:text-brand-300"
+            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-ink-600 px-3 py-2.5 text-xs font-semibold text-mist-200 transition hover:border-brand-400/40 hover:text-brand-300"
           >
             <IconUpload className="h-3.5 w-3.5" /> Import JSON
           </button>
@@ -269,7 +275,7 @@ export function ProfileView({
           <button
             type="button"
             onClick={() => setResetOpen(true)}
-            className="mt-3 rounded-lg border border-rose-glow/35 px-3.5 py-2 text-xs font-semibold text-rose-glow transition hover:bg-rose-glow/10"
+            className="mt-3 min-h-11 rounded-lg border border-rose-glow/35 px-3.5 py-2 text-xs font-semibold text-rose-glow transition hover:bg-rose-glow/10"
           >
             Reset all data
           </button>

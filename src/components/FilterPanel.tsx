@@ -203,7 +203,7 @@ export function FilterPanel({
 
 export function MobileFilterButton({ active, onClick }: { active: number; onClick: () => void }) {
   return (
-    <Button variant="outline" onClick={onClick} className="lg:hidden">
+    <Button variant="outline" onClick={onClick} className="min-h-11 lg:hidden">
       <IconFilter />
       Filters
       {active > 0 && (

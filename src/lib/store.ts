@@ -57,11 +57,43 @@ export function readStored<T>(key: string, fallback: T): T {
 }
 
 /**
+ * Fits a value read back out of storage into the shape the app expects.
+ *
+ * All of this app's data lives on the device and nowhere else, so a value that
+ * does not fit its expected shape is not a cosmetic problem: there is no
+ * server copy to fall back to and no account to re-sync from, and the usual
+ * result is an unhandled render error and a blank window the user cannot get
+ * out of. Real ways that happens:
+ *
+ *   - a build that adds a field, and a profile written by the build before it
+ *   - an imported or hand-edited backup file
+ *   - a half-written value from another tab
+ *
+ * Arrays are held to actually being arrays, objects get the defaults filled in
+ * underneath whatever was stored, and a scalar has to keep its type. Anything
+ * unrecognisable falls back to the default, so the app always starts.
+ */
+function reconcile<T>(stored: unknown, fallback: T): T {
+  if (Array.isArray(fallback)) return (Array.isArray(stored) ? stored : fallback) as T
+
+  const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+
+  if (isPlainObject(fallback)) {
+    // A non-object stored value (null, an array, a stray number) carries no
+    // usable fields, so the defaults are better than whatever it claimed.
+    return (isPlainObject(stored) ? { ...fallback, ...stored } : fallback) as T
+  }
+
+  return (typeof stored === typeof fallback ? (stored as T) : fallback)
+}
+
+/**
  * State that mirrors itself into localStorage and stays in sync with other
  * open tabs of the same app.
  */
 function usePersistentState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => readStored(key, initial))
+  const [value, setValue] = useState<T>(() => reconcile(readStored<unknown>(key, initial), initial))
 
   useEffect(() => {
     try {
@@ -75,13 +107,17 @@ function usePersistentState<T>(key: string, initial: T) {
     function onStorage(event: StorageEvent) {
       if (event.key !== key || event.newValue == null) return
       try {
-        setValue(JSON.parse(event.newValue) as T)
+        setValue(reconcile<T>(JSON.parse(event.newValue), initial))
       } catch {
         /* ignore malformed payloads from other tabs */
       }
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
+    // `initial` is a module-level constant for every caller, so it is stable
+    // and deliberately not a dependency: re-running on it would fight the
+    // user's edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   return [value, setValue] as const
@@ -140,66 +176,142 @@ export function makeWorkoutItem(exercise: Exercise, index: number): WorkoutItem 
   }
 }
 
+/**
+ * Keeps only the first workout for each id.
+ *
+ * Every edit, save and delete addresses a workout by its id, so two entries
+ * sharing an id is the one state the builder must never produce: React would
+ * reuse a DOM node across two different workouts, and "delete this one" would
+ * silently remove both. The list only ever grows through the helpers below,
+ * which all funnel through here, so a duplicate can only arrive from outside —
+ * a hand-edited or merged backup file — and this clears it on the next write.
+ */
+function dedupeWorkouts(list: Workout[]): Workout[] {
+  const seen = new Set<string>()
+  return list.filter((workout) => {
+    if (seen.has(workout.id)) return false
+    seen.add(workout.id)
+    return true
+  })
+}
+
+/**
+ * A new, not-yet-saved workout. The id is minted once, here, and then travels
+ * with the workout for its whole life: saving it inserts, and saving it again
+ * updates the same row. Basing the decision on the id rather than on the name
+ * is what stops "Save workout" from ever producing a second copy.
+ */
+export function newWorkoutDraft(name = '', day?: string): Workout {
+  const now = Date.now()
+  return {
+    id: createId('wk'),
+    name: name.trim(),
+    day: day?.trim() || undefined,
+    items: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function useWorkouts() {
-  const [workouts, setWorkouts] = usePersistentState<Workout[]>(WORKOUTS_KEY, [])
+  const [stored, setWorkouts] = usePersistentState<Workout[]>(WORKOUTS_KEY, [])
+  // Cleans up a backup that carried duplicates, so every caller — and every
+  // `key` in a list — can rely on ids being unique.
+  const workouts = useMemo(() => dedupeWorkouts(stored), [stored])
 
   const createWorkout = useCallback(
     (name: string, day?: string) => {
+      const workout = newWorkoutDraft(name || 'New workout', day)
+      setWorkouts((current) => dedupeWorkouts([workout, ...current]))
+      return workout
+    },
+    [setWorkouts],
+  )
+
+  /**
+   * The builder's one save path. A draft whose id is already saved replaces
+   * that entry in place, keeping its position and `createdAt`; anything else is
+   * inserted. Saving the same draft ten times leaves one workout.
+   *
+   * Merging from the stored entry rather than replacing it means fields written
+   * by an older build, or by an imported file, survive an edit.
+   */
+  const saveWorkout = useCallback(
+    (draft: Workout): Workout => {
       const now = Date.now()
-      const workout: Workout = {
-        id: createId('wk'),
-        name: name.trim() || 'New workout',
-        day: day?.trim() || undefined,
-        items: [],
-        createdAt: now,
+      const saved: Workout = {
+        ...draft,
+        id: draft.id || createId('wk'),
+        name: draft.name.trim() || 'New workout',
+        day: draft.day?.trim() || undefined,
         updatedAt: now,
       }
-      setWorkouts((current) => [workout, ...current])
-      return workout
+      setWorkouts((current) => {
+        const list = dedupeWorkouts(current)
+        const index = list.findIndex((workout) => workout.id === saved.id)
+        if (index === -1) return [{ ...saved, createdAt: saved.createdAt || now }, ...list]
+        const next = [...list]
+        next[index] = { ...list[index], ...saved, createdAt: list[index].createdAt, updatedAt: now }
+        return next
+      })
+      return saved
     },
     [setWorkouts],
   )
 
   const updateWorkout = useCallback(
     (id: string, patch: Partial<Omit<Workout, 'id' | 'createdAt' | 'updatedAt'>>) => {
-      setWorkouts((current) =>
-        current.map((workout) =>
+      setWorkouts((current) => {
+        const list = dedupeWorkouts(current)
+        // An unknown id is a no-op rather than an insert: silently adding a
+        // workout nobody asked for is how duplicates get in.
+        if (!list.some((workout) => workout.id === id)) return list
+        return list.map((workout) =>
           workout.id === id ? { ...workout, ...patch, updatedAt: Date.now() } : workout,
-        ),
-      )
+        )
+      })
     },
     [setWorkouts],
   )
 
   const deleteWorkout = useCallback(
-    (id: string) => setWorkouts((current) => current.filter((workout) => workout.id !== id)),
+    (id: string) =>
+      setWorkouts((current) => dedupeWorkouts(current).filter((workout) => workout.id !== id)),
     [setWorkouts],
   )
 
   const duplicateWorkout = useCallback(
     (id: string) => {
       let copy: Workout | undefined
-      setWorkouts((current) =>
-        current.flatMap((workout) => {
-          if (workout.id !== id) return [workout]
-          const now = Date.now()
-          copy = {
-            ...workout,
-            id: createId('wk'),
-            name: `${workout.name} (copy)`,
-            items: workout.items.map((item) => ({ ...item, id: createId('item') })),
-            createdAt: now,
-            updatedAt: now,
+      setWorkouts((current) => {
+        const list = dedupeWorkouts(current)
+        const next: Workout[] = []
+        for (const workout of list) {
+          if (workout.id === id) {
+            const now = Date.now()
+            copy = {
+              ...workout,
+              // A copy is a genuinely new workout, so it gets a new id — but a
+              // fresh "n copy" name that the user can rename, not a second row
+              // that collides with the original.
+              id: createId('wk'),
+              name: `${workout.name} (copy)`,
+              items: workout.items.map((item) => ({ ...item, id: createId('item') })),
+              createdAt: now,
+              updatedAt: now,
+            }
+            next.push(copy)
           }
-          return [copy, workout]
-        }),
-      )
+          next.push(workout)
+        }
+        return next
+      })
       return copy
     },
     [setWorkouts],
   )
 
-  return { workouts, createWorkout, updateWorkout, deleteWorkout, duplicateWorkout }
+  return { workouts, createWorkout, saveWorkout, updateWorkout, deleteWorkout, duplicateWorkout }
 }
 
 /* ── Sessions: the only source of "training actually happened" ───────────── */
@@ -473,20 +585,27 @@ export function useProfile() {
  * light-mode user never sees a dark flash on first paint.
  */
 export function preloadTheme(): 'dark' | 'light' {
-  const theme = readStored<'dark' | 'light'>(THEME_KEY, 'dark')
+  // Validated explicitly, because this runs before anything can recover: an
+  // unexpected value here would leave the document in a theme that does not
+  // exist, and it is set straight onto <html>.
+  const theme = readStored<string>(THEME_KEY, 'dark') === 'light' ? 'light' : 'dark'
   document.documentElement.dataset.theme = theme
   return theme
 }
 
 /** Theme lives outside the profile so it applies before the app mounts. */
 export function useTheme() {
-  const [theme, setTheme] = usePersistentState<'dark' | 'light'>(THEME_KEY, 'dark')
+  const [stored, setStored] = usePersistentState<string>(THEME_KEY, 'dark')
+  // Narrowed rather than merely type-checked: a theme is one of two exact
+  // values, and anything else would be written straight onto <html> where it
+  // means no theme at all. Dark is the safe answer, not a crash.
+  const theme: 'dark' | 'light' = stored === 'light' ? 'light' : 'dark'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
-  return { theme, setTheme }
+  return { theme, setTheme: setStored }
 }
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */

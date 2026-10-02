@@ -93,7 +93,7 @@ export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }:
           <button
             type="button"
             onClick={onRequestAdd}
-            className="rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
+            className="min-h-11 rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
           >
             + Log a record
           </button>
@@ -160,7 +160,7 @@ export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }:
                     type="button"
                     onClick={() => onDelete(entry.id)}
                     aria-label={`Delete record for ${exercise.name}`}
-                    className="shrink-0 rounded-md p-1.5 text-mist-500 transition hover:text-rose-glow"
+                    className="grid size-11 shrink-0 place-items-center rounded-md text-mist-500 transition hover:text-rose-glow"
                   >
                     <IconTrash className="h-3.5 w-3.5" />
                   </button>
@@ -272,7 +272,7 @@ export function AddRecordSheet({ best, onAdd, onClose }: AddRecordSheetProps) {
           type="button"
           onClick={submit}
           disabled={!isRecord || !resolved}
-          className="w-full rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400 disabled:bg-ink-700 disabled:text-ink-500"
+          className="min-h-11 w-full rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400 disabled:bg-ink-700 disabled:text-ink-500"
         >
           Save record
         </button>

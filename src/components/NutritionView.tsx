@@ -200,7 +200,7 @@ export function NutritionView({
               type="button"
               onClick={() => setDate(addDays(date, -1))}
               aria-label="Previous day"
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
+              className="grid h-11 w-11 place-items-center rounded-lg border border-ink-600 text-[11px] text-mist-300 hover:border-ink-500"
             >
               ←
             </button>
@@ -212,7 +212,7 @@ export function NutritionView({
               onClick={() => setDate(addDays(date, 1))}
               disabled={date >= todayKey()}
               aria-label="Next day"
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500 disabled:opacity-40"
+              className="grid h-11 w-11 place-items-center rounded-lg border border-ink-600 text-[11px] text-mist-300 hover:border-ink-500 disabled:opacity-40"
             >
               →
             </button>
@@ -281,7 +281,7 @@ export function NutritionView({
             <button
               type="button"
               onClick={() => onUpdateDay(date, { waterMl: Math.max(0, waterDone - WATER_STEP) })}
-              className="rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
+              className="min-h-11 rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
             >
               −{WATER_STEP} ml
             </button>
@@ -290,7 +290,7 @@ export function NutritionView({
                 key={amount}
                 type="button"
                 onClick={() => onUpdateDay(date, { waterMl: waterDone + amount })}
-                className="rounded-lg border border-brand-400/30 bg-brand-500/8 px-3 py-1.5 text-[11px] font-medium text-brand-300 transition hover:bg-brand-500/15"
+                className="min-h-11 rounded-lg border border-brand-400/30 bg-brand-500/8 px-3 py-1.5 text-[11px] font-medium text-brand-300 transition hover:bg-brand-500/15"
               >
                 +{amount} ml
               </button>
@@ -314,7 +314,7 @@ export function NutritionView({
                 meal: { id: '', slot: 'breakfast', name: '', items: [], done: false },
               })
             }
-            className="inline-flex items-center gap-1 rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-brand-400/40 px-3 py-1.5 text-xs font-semibold text-brand-300 transition hover:bg-brand-500/10"
           >
             <IconPlus className="h-3.5 w-3.5" /> Add meal
           </button>
@@ -339,7 +339,7 @@ export function NutritionView({
                       })
                     }
                     aria-label={`Add a meal to ${slot.label}`}
-                    className="shrink-0 rounded-lg border border-ink-600 p-1.5 text-mist-400 transition hover:border-brand-400/40 hover:text-brand-300"
+                    className="grid size-11 shrink-0 place-items-center rounded-lg border border-ink-600 text-mist-400 transition hover:border-brand-400/40 hover:text-brand-300"
                   >
                     <IconPlus className="h-3.5 w-3.5" />
                   </button>

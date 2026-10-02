@@ -103,7 +103,7 @@ export function LibraryView({ savedIds, onToggleSave, onOpen }: LibraryViewProps
                   key={term}
                   type="button"
                   onClick={() => patch({ query: term })}
-                  className="rounded-md border border-ink-600/80 px-2 py-0.5 text-[11px] text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
+                  className="min-h-11 rounded-md border border-ink-600/80 px-2 py-0.5 text-[11px] text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
                 >
                   {term}
                 </button>

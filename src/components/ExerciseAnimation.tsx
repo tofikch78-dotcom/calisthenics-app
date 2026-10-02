@@ -217,7 +217,7 @@ export function ExerciseAnimation({
           type="button"
           onClick={() => setPlaying(!playing)}
           aria-label={playing ? `Pause the ${label ?? 'movement'} animation` : `Play the ${label ?? 'movement'} animation`}
-          className="absolute right-2 bottom-2 rounded-full border border-ink-600/80 bg-ink-900/80 px-2.5 py-1 text-[11px] font-medium text-mist-300 backdrop-blur transition hover:border-brand-400/60 hover:text-brand-300"
+          className="absolute right-1 bottom-1 min-h-11 rounded-full border border-ink-600/80 bg-ink-900/80 px-3.5 py-2 text-[11px] font-medium text-mist-300 backdrop-blur transition hover:border-brand-400/60 hover:text-brand-300"
         >
           {playing ? '❚❚ Pause' : '▶ Animate'}
         </button>

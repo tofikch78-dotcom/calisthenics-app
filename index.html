@@ -2,15 +2,233 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <title>Calisthenics Tracker</title>
     <meta
       name="description"
-      content="A complete calisthenics exercise library. Browse every push, pull, leg, core and skill movement, learn how to perform it, then build your own workout."
+      content="Track calisthenics training, exercises, skills, nutrition and personal records. Works offline; all data stays on your device."
     />
-    <title>Calisthenics Exercise Library</title>
+
+    <!--
+      Applies the stored theme to <html> before anything paints, including the
+      splash below. Without this, a light-mode user would see a dark splash
+      flash on every cold start — which is exactly what `preloadTheme()` exists
+      to prevent, just too late for the shell. Kept in sync with THEME_KEY in
+      src/lib/store.ts.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var raw = localStorage.getItem('calisthenics:theme')
+          var theme = raw && raw.charAt(0) === '"' ? JSON.parse(raw) : raw
+          document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark'
+        } catch {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
+
+    <!-- ── PWA ──────────────────────────────────────────────────────────── -->
+    <!--
+      Asset URLs are relative, not absolute. Vite leaves public/ files alone,
+      and a relative href resolves against the document URL, so the app works
+      unchanged at a domain root or in a subdirectory (GitHub Pages project
+      sites and the like) with no `base` configuration. The only navigable URLs
+      this app ever has are `/` and `/?tab=...`, both of which sit at the
+      directory that holds index.html.
+    -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#07090f" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f1f4fa" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+
+    <!--
+      Identity marker for the service worker. It reads this out of any HTML it
+      is offered and only accepts the response as the app shell if it is here.
+      A phone that cannot reach the real host does not always fail cleanly - a
+      captive portal or a corporate gateway answers with a genuine HTTP 200 and
+      a page of somebody else's HTML, and caching that would destroy the offline
+      copy for good. Keep in sync with isOurShell() in scripts/sw-template.js.
+    -->
+    <meta name="calisthenics-shell" content="1" />
+
+    <!-- Standalone launch on iOS/Android — the installed app has no browser
+         chrome, so these tags are what turn the tab into a real app. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Calisthenics" />
+    <meta name="application-name" content="Calisthenics" />
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+    <!--
+      ── Splash / loading screen ─────────────────────────────────────────
+      Inlined so it paints on the very first frame, before any CSS or JS is
+      fetched. It is the app's own dark background with the same mark as the
+      icon, so a cold start never flashes white — including offline launches,
+      where the whole point is that nothing is fetched from the network.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: #07090f;
+      }
+
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        gap: 1.25rem;
+        background: radial-gradient(120% 90% at 50% 8%, #141a27 0%, #07090f 62%);
+        color: #e8eef8;
+        font:
+          500 0.95rem/1.4 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        transition: opacity 0.22s ease;
+      }
+
+      /* Light-mode users get the light background, matching the app's theme. */
+      html[data-theme='light'] #splash {
+        background: radial-gradient(120% 90% at 50% 8%, #ffffff 0%, #f1f4fa 62%);
+        color: #1b2333;
+      }
+
+      #splash[data-hidden='true'] {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #splash figure {
+        display: grid;
+        justify-items: center;
+        gap: 1rem;
+        margin: 0;
+      }
+
+      #splash .mark {
+        width: 76px;
+        height: 76px;
+        animation: splash-bob 2.1s ease-in-out infinite;
+      }
+
+      #splash .word {
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.85;
+      }
+
+      #splash .bar {
+        width: 128px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgb(148 163 184 / 0.22);
+      }
+
+      #splash .bar i {
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #38bdf8, #22d3ee);
+        animation: splash-slide 1.15s ease-in-out infinite;
+      }
+
+      @keyframes splash-bob {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-7px);
+        }
+      }
+
+      @keyframes splash-slide {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(340%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #splash .mark,
+        #splash .bar i {
+          animation: none;
+        }
+        #splash .bar i {
+          width: 100%;
+        }
+      }
+    </style>
   </head>
   <body>
+    <!--
+      The splash is removed by main.tsx once React has mounted. It is kept
+      out of the accessibility tree and hidden from the app shell so it can
+      never be read by a screen reader after React takes over.
+    -->
+    <div id="splash" aria-hidden="true">
+      <figure>
+        <svg class="mark" viewBox="0 0 512 512" role="presentation">
+          <defs>
+            <linearGradient id="splash-bar" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#38bdf8" />
+              <stop offset="1" stop-color="#22d3ee" />
+            </linearGradient>
+          </defs>
+          <rect x="96" y="118" width="320" height="22" rx="11" fill="url(#splash-bar)" />
+          <rect x="126" y="118" width="16" height="120" rx="8" fill="#2b3446" />
+          <rect x="370" y="118" width="16" height="120" rx="8" fill="#2b3446" />
+          <g
+            fill="none"
+            stroke="#e8eef8"
+            stroke-width="20"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M206 150 v34" />
+            <path d="M306 150 v34" />
+            <path d="M206 184 h100" />
+          </g>
+          <circle cx="256" cy="112" r="24" fill="#38bdf8" />
+          <g
+            fill="none"
+            stroke="#e8eef8"
+            stroke-width="20"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M256 140 v92" />
+            <path d="M256 232 l-44 62" />
+            <path d="M256 232 l44 62" />
+          </g>
+          <rect x="96" y="374" width="320" height="10" rx="5" fill="#2b3446" />
+        </svg>
+        <figcaption class="word">Calisthenics</figcaption>
+        <div class="bar"><i></i></div>
+      </figure>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -183,6 +183,43 @@ export function queryLibrary(
   return sortExercises(matches, query.sort)
 }
 
+/** True when the exercise trains this muscle, whether as the mover or a helper. */
+export function targetsMuscle(exercise: Exercise, muscle: Muscle): boolean {
+  return exercise.mainMuscle === muscle || exercise.secondaryMuscles.includes(muscle)
+}
+
+/**
+ * Every exercise that trains a muscle, primary movers first.
+ *
+ * "Trains" covers both the primary muscle and the secondaries, because picking
+ * Biceps should surface Pull-ups and not just Curl-ups — a workout is built
+ * around a pattern, and secondaries are where compound movements land. Sorting
+ * primaries to the top keeps the most direct answers for the muscle one tap
+ * above the fold, and `primaryOnly` narrows to just those when a user wants
+ * them and nothing else.
+ */
+export function exercisesForMuscle(muscle: Muscle, primaryOnly = false): Exercise[] {
+  return LIBRARY.filter((exercise) =>
+    primaryOnly ? exercise.mainMuscle === muscle : targetsMuscle(exercise, muscle),
+  ).sort(
+    (a, b) =>
+      Number(b.mainMuscle === muscle) - Number(a.mainMuscle === muscle) ||
+      collator.compare(a.name, b.name),
+  )
+}
+
+/** How many exercises each muscle chip should advertise, built once. */
+export const MUSCLE_EXERCISE_COUNTS: Record<Muscle, { all: number; primary: number }> =
+  Object.fromEntries(
+    TAXONOMY_MUSCLE_ORDER.map((muscle) => [
+      muscle,
+      {
+        all: LIBRARY.filter((exercise) => targetsMuscle(exercise, muscle)).length,
+        primary: LIBRARY.filter((exercise) => exercise.mainMuscle === muscle).length,
+      },
+    ]),
+  ) as Record<Muscle, { all: number; primary: number }>
+
 export function countActiveFilters(filters: LibraryFilters): number {
   return (
     (filters.query.trim() ? 1 : 0) +

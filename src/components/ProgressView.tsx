@@ -170,7 +170,7 @@ export function ProgressView({
         <button
           type="button"
           onClick={() => onGoTo('history')}
-          className="mt-3 w-full rounded-lg border border-ink-600 py-2 text-[11px] text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+          className="mt-3 min-h-11 w-full rounded-lg border border-ink-600 py-2 text-[11px] text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
         >
           Open weekly summary &amp; history →
         </button>
@@ -201,7 +201,7 @@ export function ProgressView({
             onChange={(event) => setWeightInput(event.target.value)}
             placeholder={profile?.weightKg ? String(profile.weightKg) : 'kg'}
             aria-label="Body weight in kilograms"
-            className="tnum w-28 rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
+            className="tnum min-h-11 w-28 rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
           />
           <button
             type="button"
@@ -212,7 +212,7 @@ export function ProgressView({
               setWeightInput('')
             }}
             disabled={!weightInput}
-            className="inline-flex items-center gap-1 rounded-lg bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-400 disabled:bg-ink-700 disabled:text-ink-500"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-400 disabled:bg-ink-700 disabled:text-ink-500"
           >
             <IconPlus className="h-3.5 w-3.5" /> Log today
           </button>
@@ -333,14 +333,14 @@ export function ProgressView({
       <button
         type="button"
         onClick={() => onGoTo('records')}
-        className="w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-amber-glow/40 hover:text-amber-glow"
+        className="min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-amber-glow/40 hover:text-amber-glow"
       >
         🏆 View personal records →
       </button>
       <button
         type="button"
         onClick={() => onGoTo('calendar')}
-        className="w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+        className="min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
       >
         📅 Open training calendar →
       </button>
@@ -398,7 +398,7 @@ function SuggestionRow({
         <button
           type="button"
           onClick={onDismiss}
-          className="ml-auto rounded-lg px-2.5 py-1 text-[11px] text-mist-500 transition hover:text-mist-300"
+          className="ml-auto min-h-11 rounded-lg px-2.5 py-1 text-[11px] text-mist-500 transition hover:text-mist-300"
         >
           Not now
         </button>
@@ -465,7 +465,7 @@ function ExerciseProgression({
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Filter your trained exercises"
         aria-label="Filter trained exercises"
-        className="mt-3 w-full rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 placeholder:text-ink-500 focus:border-brand-400/70 focus:outline-none"
+        className="mt-3 min-h-11 w-full rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 placeholder:text-ink-500 focus:border-brand-400/70 focus:outline-none"
       />
 
       <ul className="mt-3 space-y-1.5">
@@ -518,7 +518,7 @@ function ExerciseProgression({
                         ? 'Set level'
                         : `Set manually (auto: ${row.level} — ${row.source})`
                     }
-                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition ${
+                    className={`grid h-11 w-8 place-items-center rounded-md text-sm font-semibold transition ${
                       isCurrent
                         ? 'bg-brand-500/20 text-brand-300 ring-1 ring-brand-400/40'
                         : 'bg-ink-800 text-mist-500 hover:text-mist-200'

@@ -224,8 +224,40 @@
     -moz-appearance: textfield;
   }
 
+  /*
+   * Safe-area helpers. `viewport-fit=cover` in index.html lets the app paint
+   * under the notch and the gesture bar, which is what makes an installed app
+   * feel native — but only if the real insets are added back as padding. The
+   * fallbacks are 0 on desktop and in a normal browser tab, so these are inert
+   * everywhere except on the devices that need them.
+   */
   .pb-safe {
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  }
+
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .px-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /* Landscape on a notched phone: the bar overlaps the left/right edges. */
+  .bottom-nav-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.25rem);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /*
+   * Mobile guard-rail. `100%` rather than `100vw` on purpose: 100vw includes
+   * the scrollbar gutter on desktop, which is a classic source of a few stray
+   * pixels of horizontal overflow.
+   */
+  .overflow-x-clip {
+    overflow-x: clip;
   }
 }
 

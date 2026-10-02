@@ -58,7 +58,7 @@ export function CalendarView({ sessions, workouts, profile, onOpenSession }: Cal
             type="button"
             onClick={() => shift(-1)}
             aria-label="Previous month"
-            className="rotate-180 rounded-lg border border-ink-600 p-2 text-mist-300 transition hover:border-ink-500 hover:text-white"
+            className="grid size-11 rotate-180 place-items-center rounded-lg border border-ink-600 text-mist-300 transition hover:border-ink-500 hover:text-white"
           >
             <IconChevron className="h-3.5 w-3.5" />
           </button>
@@ -67,7 +67,7 @@ export function CalendarView({ sessions, workouts, profile, onOpenSession }: Cal
             type="button"
             onClick={() => shift(1)}
             aria-label="Next month"
-            className="rounded-lg border border-ink-600 p-2 text-mist-300 transition hover:border-ink-500 hover:text-white"
+            className="grid size-11 place-items-center rounded-lg border border-ink-600 text-mist-300 transition hover:border-ink-500 hover:text-white"
           >
             <IconChevron className="h-3.5 w-3.5" />
           </button>

@@ -95,7 +95,7 @@ export function SessionView({
               value={session.workoutName}
               onChange={(event) => onChange({ workoutName: event.target.value })}
               aria-label="Workout name"
-              className="w-full truncate bg-transparent text-base font-bold text-white focus:outline-none"
+              className="min-h-11 w-full truncate bg-transparent text-base font-bold text-white focus:outline-none"
             />
             <p className="tnum mt-0.5 text-[11px] text-mist-400">
               {relativeDay(session.date)} · {formatDuration(elapsed)} · {stats.setsDone}/{stats.setsTotal} sets ·{' '}
@@ -103,9 +103,14 @@ export function SessionView({
             </p>
           </div>
 
+          {/*
+           * Both finish buttons go through the confirmation. The sticky one is
+           * the easiest to hit by accident on a phone, and filing a session is
+           * not undoable, so it cannot be a shortcut around the dialog.
+           */}
           <button
             type="button"
-            onClick={onFinish}
+            onClick={() => setConfirmFinish(true)}
             className="shrink-0 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400"
           >
             Finish
@@ -284,9 +289,16 @@ function SessionItemCard({
                 playing ? `Pause the ${exercise.name} animation` : `Play the ${exercise.name} animation`
               }
               aria-pressed={playing}
-              className="absolute -right-1 -bottom-1 z-20 grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900 text-[7px] leading-none text-mist-300"
+              /*
+               * The visible dot stays small, but the tap target is grown to a
+               * full 44px - a 16px dot cannot be hit reliably mid-set, and this
+               * sits directly on top of the "open exercise" hit area.
+               */
+              className="absolute -right-2 -bottom-2 z-20 grid size-11 place-items-center rounded-full text-mist-300 transition hover:text-brand-300"
             >
-              {playing ? '❚❚' : '▶'}
+              <span className="grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900 text-[7px] leading-none">
+                {playing ? '❚❚' : '▶'}
+              </span>
             </button>
           )}
           <button
@@ -315,7 +327,7 @@ function SessionItemCard({
           type="button"
           onClick={() => onRemove(item.id)}
           aria-label={`Remove ${exercise.name} from session`}
-          className="shrink-0 rounded-md p-1.5 text-mist-400 transition hover:bg-rose-glow/10 hover:text-rose-glow"
+          className="grid size-11 shrink-0 place-items-center rounded-md text-mist-400 transition hover:bg-rose-glow/10 hover:text-rose-glow"
         >
           <IconTrash className="h-3.5 w-3.5" />
         </button>
@@ -329,7 +341,7 @@ function SessionItemCard({
               onClick={() => onToggleSet(item.id, index)}
               aria-pressed={set.status === 'done'}
               aria-label={`Set ${index + 1} ${set.status === 'done' ? 'done' : 'not done'}`}
-              className={`grid size-8 shrink-0 place-items-center rounded-lg border text-xs font-semibold transition ${
+              className={`grid size-11 shrink-0 place-items-center rounded-lg border text-xs font-semibold transition ${
                 set.status === 'done'
                   ? 'border-lime-glow/40 bg-lime-glow/20 text-lime-glow'
                   : set.status === 'skipped'
@@ -349,7 +361,7 @@ function SessionItemCard({
                   onPatchSet(item.id, index, { holdSec: event.target.value === '' ? undefined : Number(event.target.value) })
                 }
                 aria-label={`Set ${index + 1} hold seconds`}
-                className="tnum w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
+                className="tnum min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
               />
             ) : (
               <input
@@ -360,7 +372,7 @@ function SessionItemCard({
                   onPatchSet(item.id, index, { reps: event.target.value === '' ? undefined : Number(event.target.value) })
                 }
                 aria-label={`Set ${index + 1} reps`}
-                className="tnum w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
+                className="tnum min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
               />
             )}
 
@@ -377,7 +389,7 @@ function SessionItemCard({
               }
               aria-label={`Set ${index + 1} weight in kilograms`}
               placeholder="kg"
-              className="tnum ml-auto w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
+              className="tnum ml-auto min-h-11 w-20 rounded-lg border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm text-mist-100 no-spinner focus:border-brand-400/70 focus:outline-none"
             />
 
             <button
@@ -385,7 +397,7 @@ function SessionItemCard({
               onClick={() => onPatchSet(item.id, index, { status: set.status === 'skipped' ? 'pending' : 'skipped' })}
               aria-label={`${set.status === 'skipped' ? 'Unskip' : 'Skip'} set ${index + 1}`}
               title={set.status === 'skipped' ? 'Unskip set' : 'Skip set'}
-              className={`rounded-md p-1.5 transition ${
+              className={`grid size-11 shrink-0 place-items-center rounded-md transition ${
                 set.status === 'skipped' ? 'text-rose-glow' : 'text-mist-500 hover:text-mist-300'
               }`}
             >
@@ -399,7 +411,7 @@ function SessionItemCard({
         <button
           type="button"
           onClick={() => onPatch(item.id, appendSet(item))}
-          className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
+          className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
         >
           + Set
         </button>
@@ -412,7 +424,7 @@ function SessionItemCard({
                 recomputeItemStatus({ ...item, sets: item.sets.slice(0, -1), targetSets: Math.max(1, item.sets.length - 1) }),
               )
             }
-            className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
+            className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
           >
             − Set
           </button>
@@ -421,7 +433,7 @@ function SessionItemCard({
           <button
             type="button"
             onClick={() => onPatch(item.id, { status: 'skipped', sets: item.sets.map((set) => ({ ...set, status: 'skipped' as const })) })}
-            className="ml-auto rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-rose-glow"
+            className="ml-auto min-h-11 rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-rose-glow"
           >
             Skip exercise
           </button>
@@ -429,7 +441,7 @@ function SessionItemCard({
           <button
             type="button"
             onClick={() => onPatch(item.id, { status: 'not-started', sets: item.sets.map((set) => ({ ...set, status: 'pending' as const })) })}
-            className="ml-auto rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-brand-300"
+            className="ml-auto min-h-11 rounded-lg px-2.5 py-1 text-[11px] text-mist-400 transition hover:text-brand-300"
           >
             Unskip exercise
           </button>

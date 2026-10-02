@@ -41,7 +41,7 @@ export function BottomNav({
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/95 backdrop-blur-xl md:hidden"
       >
-        <ul className="mx-auto grid max-w-lg grid-cols-6 px-1 pb-safe">
+        <ul className="bottom-nav-safe mx-auto grid max-w-lg grid-cols-6 px-1">
           {NAV_ITEMS.map((item) => {
             const isActive = item.id === active
             return (

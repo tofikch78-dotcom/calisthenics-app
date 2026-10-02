@@ -62,7 +62,7 @@ export function MyExercisesView({
           <button
             type="button"
             onClick={onGoToLibrary}
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400"
+            className="min-h-11 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-400"
           >
             Browse the library
           </button>

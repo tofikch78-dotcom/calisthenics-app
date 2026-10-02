@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "icons": "node scripts/generate-icons.mjs",
+    "check": "npm run verify && npm run lint && npm run build",
     "lint": "oxlint",
     "verify": "node verify-library.mjs",
     "preview": "vite preview"

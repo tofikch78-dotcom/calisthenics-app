@@ -36,7 +36,7 @@ function ProgressionList({
               type="button"
               disabled={!target}
               onClick={() => target && onOpen(target)}
-              className="text-left text-sm text-mist-200 transition hover:text-white disabled:cursor-default disabled:hover:text-mist-200"
+              className="-my-1 min-h-11 py-1 text-left text-sm text-mist-200 transition hover:text-white disabled:cursor-default disabled:hover:text-mist-200"
             >
               • {target?.name ?? id.replace(/-/g, ' ')}
             </button>
@@ -122,7 +122,7 @@ function Alternatives({
                     type="button"
                     onClick={() => onOpen(item)}
                     aria-current={isCurrent ? 'true' : undefined}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                    className={`min-h-11 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                       isCurrent
                         ? 'bg-brand-500 text-white'
                         : 'border border-ink-600 text-mist-300 hover:border-brand-400/60 hover:text-white'
@@ -177,7 +177,7 @@ function Alternatives({
                 key={item.id}
                 type="button"
                 onClick={() => onOpen(item)}
-                className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-mist-300 transition hover:border-brand-400/50 hover:text-white"
+                className="min-h-11 rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-mist-300 transition hover:border-brand-400/50 hover:text-white"
               >
                 {item.name}
               </button>
@@ -254,7 +254,7 @@ export function ExerciseDetail({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-2 text-mist-400 transition hover:bg-ink-800 hover:text-white"
+            className="grid size-11 shrink-0 place-items-center rounded-lg text-mist-400 transition hover:bg-ink-800 hover:text-white"
           >
             <IconClose />
           </button>
@@ -294,13 +294,13 @@ export function ExerciseDetail({
               <Button
                 variant={saved ? 'outline' : 'primary'}
                 onClick={() => onToggleSave(exercise.id)}
-                className={saved ? 'border-lime-glow/40 text-lime-glow' : ''}
+                className={saved ? 'min-h-11 border-lime-glow/40 text-lime-glow' : 'min-h-11'}
               >
                 {saved ? <IconCheck /> : <IconPlus />}
                 {saved ? 'Remove from My Exercises' : 'Add to My Exercises'}
               </Button>
               {onQuickAdd && (
-                <Button variant="outline" onClick={() => onQuickAdd(exercise)}>
+                <Button variant="outline" onClick={() => onQuickAdd(exercise)} className="min-h-11">
                   <IconDumbbell />
                   Add to a workout
                 </Button>

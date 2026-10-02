@@ -161,7 +161,7 @@ export function HomeView({
           <button
             type="button"
             onClick={() => onGoTo('workout')}
-            className="mt-4 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400"
+            className="mt-4 min-h-11 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400"
           >
             Go to workout
           </button>
@@ -224,7 +224,7 @@ export function HomeView({
           <button
             type="button"
             onClick={() => onGoTo('progress')}
-            className="mt-2.5 w-full rounded-lg border border-amber-glow/30 py-1.5 text-[11px] text-amber-glow transition hover:bg-amber-glow/10"
+            className="mt-2.5 flex min-h-11 w-full items-center justify-center rounded-lg border border-amber-glow/30 py-1.5 text-[11px] text-amber-glow transition hover:bg-amber-glow/10"
           >
             See all records →
           </button>
@@ -241,7 +241,7 @@ export function HomeView({
               <button
                 type="button"
                 onClick={() => onOpenExercise(suggestion.nextExercise!)}
-                className="rounded-lg border border-lime-glow/30 px-2.5 py-1 text-[11px] text-lime-glow transition hover:bg-lime-glow/10"
+                className="min-h-11 rounded-lg border border-lime-glow/30 px-2.5 py-1 text-[11px] text-lime-glow transition hover:bg-lime-glow/10"
               >
                 {suggestion.nextExercise.name} →
               </button>
@@ -249,7 +249,7 @@ export function HomeView({
             <button
               type="button"
               onClick={() => onGoTo('progress')}
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
+              className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 transition hover:border-ink-500"
             >
               All suggestions
             </button>
@@ -263,7 +263,7 @@ export function HomeView({
           <button
             type="button"
             onClick={() => onGoTo('progress')}
-            className="text-[11px] text-brand-300 hover:text-brand-200"
+            className="-my-2 min-h-11 px-1 text-[11px] text-brand-300 hover:text-brand-200"
           >
             History →
           </button>
@@ -310,7 +310,7 @@ export function HomeView({
             <button
               type="button"
               onClick={() => onGoTo('nutrition')}
-              className="text-[11px] text-brand-300 hover:text-brand-200"
+              className="-my-2 min-h-11 px-1 text-[11px] text-brand-300 hover:text-brand-200"
             >
               Nutrition →
             </button>
@@ -352,7 +352,7 @@ export function HomeView({
             key={target}
             type="button"
             onClick={() => onGoTo(target)}
-            className="rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+            className="min-h-11 rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
           >
             {label}
           </button>
@@ -411,7 +411,7 @@ function SkillShelf({
         <button
           type="button"
           onClick={() => onGoTo('exercises')}
-          className="text-[11px] text-brand-300 hover:text-brand-200"
+          className="-my-2 min-h-11 px-1 text-[11px] text-brand-300 hover:text-brand-200"
         >
           All skills →
         </button>

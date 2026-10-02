@@ -80,7 +80,7 @@ export function WorkoutTab({
           <button
             type="button"
             onClick={onStartFreestyle}
-            className="rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+            className="min-h-11 rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
           >
             + Empty session
           </button>
@@ -129,7 +129,7 @@ export function WorkoutTab({
             <button
               type="button"
               onClick={() => onOpenBuilder(null)}
-              className="mt-3 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-400"
+              className="mt-3 min-h-11 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-400"
             >
               Create a workout
             </button>
@@ -171,14 +171,14 @@ export function WorkoutTab({
         <button
           type="button"
           onClick={() => onGoTo('builder')}
-          className="rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+          className="min-h-11 rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
         >
           ⚙️ Workout builder
         </button>
         <button
           type="button"
           onClick={() => onGoTo('history')}
-          className="rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+          className="min-h-11 rounded-xl border border-ink-600 py-3 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
         >
         📋 History &amp; summary
         </button>

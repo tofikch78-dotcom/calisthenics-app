@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
-import { getExercise } from './data'
 import { BottomNav } from './components/BottomNav'
 import { CalendarView } from './components/CalendarView'
 import { ExerciseDetail } from './components/ExerciseDetail'
 import { ExercisePicker } from './components/ExercisePicker'
 import { HistoryView } from './components/HistoryView'
 import { HomeView, type Tab } from './components/HomeView'
+import { InstallBanner } from './components/InstallBanner'
 import { LibraryView } from './components/LibraryView'
 import { MyExercisesView } from './components/MyExercisesView'
 import { NutritionView } from './components/NutritionView'
@@ -22,7 +22,6 @@ import { computeStreak, deriveSessionStatus, recordCandidates } from './lib/stat
 import { addSessionItem, emptySession, startSession } from './lib/session'
 import {
   bestFor,
-  makeWorkoutItem,
   resetAllData,
   useDismissedSuggestions,
   useLevelOverrides,
@@ -37,6 +36,7 @@ import {
   useWeightLog,
   useWorkouts,
 } from './lib/store'
+import { initialTab } from './lib/pwa'
 import type { Exercise, Workout, WorkoutSession } from './types'
 
 type ExerciseTab = 'library' | 'mine' | 'skills'
@@ -44,16 +44,14 @@ type ProgressTab = 'dashboard' | 'calendar' | 'records' | 'history'
 type WorkoutTabId = 'today' | 'builder'
 
 /** Where the exercise picker should put the exercises the user picks. */
-type PickerTarget =
-  | { kind: 'workout'; workoutId: string }
-  | { kind: 'session'; sessionId: string }
+type PickerTarget = { kind: 'session'; sessionId: string }
 
 export default function App() {
   const { profile, update: updateProfile, completeOnboarding } = useProfile()
   const { theme, setTheme } = useTheme()
 
   const { ids, savedIds, toggle, clear } = useMyExercises()
-  const { workouts, createWorkout, updateWorkout, deleteWorkout, duplicateWorkout } = useWorkouts()
+  const { workouts, saveWorkout, deleteWorkout, duplicateWorkout } = useWorkouts()
   const { sessions, addSession, updateSession, deleteSession } = useSessions()
   const { records, addRecord, deleteRecord } = useRecords()
   const { days, updateDay, addMeal, updateMeal, deleteMeal } = useNutrition()
@@ -63,7 +61,8 @@ export default function App() {
   const { overrides, setOverride } = useLevelOverrides()
   const { dismissed, dismiss } = useDismissedSuggestions()
 
-  const [tab, setTab] = useState<Tab>('home')
+  // Deep-linked by the manifest shortcuts (`/?tab=nutrition`), home otherwise.
+  const [tab, setTab] = useState<Tab>(() => initialTab())
   const [exerciseTab, setExerciseTab] = useState<ExerciseTab>('library')
   const [progressTab, setProgressTab] = useState<ProgressTab>('dashboard')
   const [workoutTab, setWorkoutTab] = useState<WorkoutTabId>('today')
@@ -74,6 +73,7 @@ export default function App() {
   const [openSkillId, setOpenSkillId] = useState<string | null>(null)
   const [addRecordOpen, setAddRecordOpen] = useState(false)
   const [seedExerciseIds, setSeedExerciseIds] = useState<string[]>([])
+  const [openWorkoutId, setOpenWorkoutId] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
@@ -176,58 +176,43 @@ export default function App() {
     setTab('exercises')
   }, [])
 
-  /** Creates a workout and jumps straight into the builder with it open. */
-  const createWorkoutWithSeeds = useCallback(
-    (name: string, day: string, seeds: string[]) => {
-      const workout = createWorkout(name, day)
-      if (seeds.length) {
-        // The builder promises "N selected exercises will be added" — so add
-        // them now rather than only telling the user about them. Each exercise
-        // starts from its own recommended sets/reps/rest.
-        const items = seeds
-          .map((id) => getExercise(id))
-          .filter((exercise): exercise is Exercise => Boolean(exercise))
-          .map(makeWorkoutItem)
-        if (items.length) updateWorkout(workout.id, { items })
-        setSeedExerciseIds(items.map((item) => item.exerciseId))
-      }
-      setWorkoutTab('builder')
-      setTab('workout')
-      return workout
+  /**
+   * Opens the builder on a new draft, optionally pre-loaded with exercises
+   * chosen somewhere else. Nothing is written until the user saves, so being
+   * sent here can never leave a half-built workout behind in My Workouts.
+   */
+  const openBuilderWithSeeds = useCallback((seeds: string[]) => {
+    if (seeds.length) setSeedExerciseIds(seeds)
+    setOpenWorkoutId(null)
+    setWorkoutTab('builder')
+    setTab('workout')
+  }, [])
+
+  const saveWorkoutFromBuilder = useCallback(
+    (workout: Workout) => {
+      const existed = workouts.some((entry) => entry.id === workout.id)
+      saveWorkout(workout)
+      notify(existed ? `Updated “${workout.name}”.` : `Saved “${workout.name}” to My Workouts.`)
     },
-    [createWorkout, updateWorkout],
+    [notify, saveWorkout, workouts],
   )
 
   const pickerPresentIds = useMemo(() => {
     if (!picker) return []
-    if (picker.kind === 'workout') {
-      return (workouts.find((workout) => workout.id === picker.workoutId)?.items ?? []).map(
-        (item) => item.exerciseId,
-      )
-    }
     return (sessions.find((session) => session.id === picker.sessionId)?.items ?? []).map(
       (item) => item.exerciseId,
     )
-  }, [picker, workouts, sessions])
+  }, [picker, sessions])
 
   const handlePick = useCallback(
     (exercise: Exercise) => {
       if (!picker) return
-      if (picker.kind === 'workout') {
-        const workout = workouts.find((entry) => entry.id === picker.workoutId)
-        if (!workout) return
-        updateWorkout(workout.id, {
-          items: [...workout.items, makeWorkoutItem(exercise, workout.items.length)],
-        })
-        notify(`Added ${exercise.name}.`)
-        return
-      }
       const session = sessions.find((entry) => entry.id === picker.sessionId)
       if (!session) return
       updateSession(session.id, { items: [...session.items, addSessionItem(exercise)] })
       notify(`Added ${exercise.name} to the session.`)
     },
-    [picker, workouts, sessions, updateWorkout, updateSession, notify],
+    [picker, sessions, updateSession, notify],
   )
 
   /* ── Onboarding gate ─────────────────────────────────────────────────── */
@@ -243,14 +228,16 @@ export default function App() {
   /* ── Render ──────────────────────────────────────────────────────────── */
 
   return (
-    <div className="min-h-dvh pb-24 md:pb-10">
+    <div className="min-h-dvh overflow-x-clip pb-24 md:pb-10">
       <BottomNav
         active={tab}
         onChange={setTab}
         badges={{ workout: liveSession ? true : undefined }}
       />
 
-      <main className="mx-auto max-w-5xl px-4 py-5">
+      {/* px-safe keeps content clear of a landscape notch; pt-safe clears the
+          status bar, which `viewport-fit=cover` otherwise lets us paint under. */}
+      <main className="mx-auto max-w-5xl px-4 pt-safe pb-5 md:py-5">
         {tab === 'home' && (
           <HomeView
             profile={profile}
@@ -302,9 +289,10 @@ export default function App() {
                   onStart={startWorkout}
                   onStartFreestyle={startFreestyle}
                   onResume={openSession}
-                  onOpenBuilder={() => {
+                  onOpenBuilder={(workoutId) => {
+                    setOpenWorkoutId(workoutId)
                     setWorkoutTab('builder')
-                    notify('Pick a workout below to edit it, or create a new one.')
+                    setTab('workout')
                   }}
                   onGoTo={(target) => {
                     if (target === 'builder') setWorkoutTab('builder')
@@ -317,7 +305,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => goToProgress('history')}
-                className="mt-4 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
+                className="mt-4 min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
               >
                 📋 View full history &amp; weekly summary
               </button>
@@ -326,14 +314,16 @@ export default function App() {
             {workoutTab === 'builder' && (
               <WorkoutsView
                 workouts={workouts}
-                onCreate={createWorkoutWithSeeds}
-                onUpdate={updateWorkout}
+                savedIds={savedIds}
+                onSave={saveWorkoutFromBuilder}
                 onDelete={deleteWorkout}
                 onDuplicate={duplicateWorkout}
-                onRequestAddExercise={(workoutId) => setPicker({ kind: 'workout', workoutId })}
+                onStart={startWorkout}
                 onOpenExercise={setDetail}
                 seedExerciseIds={seedExerciseIds}
                 onSeedConsumed={() => setSeedExerciseIds([])}
+                openWorkoutId={openWorkoutId}
+                onOpenConsumed={() => setOpenWorkoutId(null)}
               />
             )}
           </>
@@ -362,9 +352,7 @@ export default function App() {
                 onOpen={setDetail}
                 onClear={clear}
                 onGoToLibrary={() => setExerciseTab('library')}
-                onStartWorkout={(exerciseIds) =>
-                  createWorkoutWithSeeds('New workout', '', exerciseIds)
-                }
+                onStartWorkout={openBuilderWithSeeds}
               />
             )}
 
@@ -520,6 +508,9 @@ export default function App() {
           {toast}
         </div>
       )}
+
+      {/* Sits above the bottom nav, below the toast. */}
+      <InstallBanner />
     </div>
   )
 }
@@ -549,7 +540,11 @@ function SubTabs<T extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(option.id)}
-            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+            className={`shrink-0 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition ${
+              // min-h-11 keeps every tab a full thumb-sized target; the row
+              // scrolls horizontally on narrow phones instead.
+              'min-h-11 py-1.5 '
+            }${
               active
                 ? 'bg-brand-500/18 text-brand-300 ring-1 ring-brand-400/35'
                 : 'bg-ink-850/70 text-mist-400 hover:bg-ink-800 hover:text-mist-100'

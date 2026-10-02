@@ -123,7 +123,7 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
                 key={id}
                 type="button"
                 onClick={() => setRange(id)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
+                className={`min-h-11 rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
                   range === id ? 'bg-brand-500/18 text-brand-300' : 'bg-ink-800/70 text-mist-400 hover:text-mist-100'
                 }`}
               >
@@ -138,14 +138,14 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
             <button
               type="button"
               onClick={() => setWeekStart(addDays(weekStart, -7))}
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
+              className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
             >
               ← Prev
             </button>
             <button
               type="button"
               onClick={() => setWeekStart(startOfWeek(todayKey()))}
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
+              className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
             >
               This week
             </button>
@@ -153,7 +153,7 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
               type="button"
               onClick={() => setWeekStart(addDays(weekStart, 7))}
               disabled={weekStart >= startOfWeek(todayKey())}
-              className="rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500 disabled:opacity-40"
+              className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500 disabled:opacity-40"
             >
               Next →
             </button>
