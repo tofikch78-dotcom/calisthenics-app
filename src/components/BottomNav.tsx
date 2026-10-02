@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { ComponentType } from 'react'
 import { IconChart, IconGear, IconHome, IconLeaf } from './kit'
 import { IconBook, IconDumbbell } from './ui'
+import { Logo } from './Logo'
 import type { Tab } from './HomeView'
 
 interface NavItem {
@@ -116,8 +117,11 @@ export function BottomNav({
         className="sticky top-0 z-40 hidden border-b border-ink-700 bg-ink-950/85 backdrop-blur-xl md:block"
       >
         <div className="mx-auto flex max-w-5xl items-center gap-1 px-4 py-2">
-          <span className="mr-3 text-sm font-bold tracking-tight text-white">
-            Calisthenics<span className="text-brand-300">.</span>
+          <span className="mr-3 inline-flex items-center gap-1.5">
+            <Logo className="h-6 w-6" />
+            <span className="text-sm font-bold tracking-tight text-white">
+              Calisthenics<span className="text-brand-300">.</span>
+            </span>
           </span>
           {NAV_ITEMS.map((item) => {
             const isActive = item.id === active

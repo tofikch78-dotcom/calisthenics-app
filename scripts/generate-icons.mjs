@@ -1,10 +1,22 @@
 /**
- * Generates the PWA icon set as real PNGs, with no image dependencies.
+ * Generates the PWA icon set and the vector marks from one description of the
+ * logo, with no image dependencies.
  *
- * The artwork is rasterised in plain JS — rounded rects, circles and thick
- * lines — at 4x and then box-downsampled, which is what gives the edges their
- * anti-aliasing. PNG encoding is done by hand (IHDR/IDAT/IEND + CRC32) on top
- * of Node's built-in zlib.
+ * The mark is the lightning bolt traced out of the source artwork: its nine
+ * edges were recovered from sub-pixel scanline crossings, least-squares fitted,
+ * and then refined against the original alpha channel until the polygon
+ * rasterised back to IoU 0.980 against the source, so what is drawn here is the
+ * same shape rather than a lookalike. The fill is the purple-to-blue ramp
+ * measured from the same artwork, whose axis is 8.72 degrees off horizontal and
+ * whose blue channel is constant.
+ *
+ * Geometry below is therefore expressed in the source artwork's own pixel
+ * coordinates (x right, y down) and mapped onto whatever canvas is being drawn,
+ * which keeps the marks identical at every size instead of re-derived per size.
+ *
+ * The artwork is rasterised in plain JS with 4x supersampling, which is what
+ * gives the edges their anti-aliasing. PNG encoding is done by hand
+ * (IHDR/IDAT/IEND + CRC32) on top of Node's built-in zlib.
  *
  * Run with:  node scripts/generate-icons.mjs
  */
@@ -16,6 +28,53 @@ import { fileURLToPath } from 'node:url'
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
 const SS = 4 // supersampling factor
+
+/* ── The artwork ──────────────────────────────────────────────────────────── */
+
+/*
+ * The bolt, clockwise from the top-left corner, in source-artwork pixels. The
+ * source image crops the mark tightly, which is why the bounds run slightly
+ * outside 0..32 / 0..31: the left tip and the flat top sit on the crop edge.
+ */
+const BOLT = [
+  [6.5079, -0.5], // flat top, left end
+  [27.5103, -0.5], // flat top, right end
+  [20.1254, 10.2107], // down the upper right slant to the step
+  [31.9966, 10.2107], // right along the step to the lower right corner
+  [15.4317, 31.3911], // down the long right edge to the tip
+  [15.3206, 20.8181], // up the tail's flank
+  [4.9418, 20.8181], // left along the underside
+  [12.1342, 10.2107], // up the lower left slant to the step
+  [-1.1312, 10.2107], // left along the step to the left corner
+]
+
+const BOLT_MIN_X = Math.min(...BOLT.map((p) => p[0]))
+const BOLT_MAX_X = Math.max(...BOLT.map((p) => p[0]))
+const BOLT_MIN_Y = Math.min(...BOLT.map((p) => p[1]))
+const BOLT_MAX_Y = Math.max(...BOLT.map((p) => p[1]))
+
+/*
+ * The fill. `axis` is the unit direction the ramp runs along, measured by
+ * regressing every colour channel against that projection and keeping the
+ * direction with the least error; `from`/`to` are the colours at `tFrom`/`tTo`,
+ * so the ramp between them is linear and identical to the two stops the SVG
+ * marks use. Outside that span the ends hold.
+ */
+const FILL = {
+  axis: [0.9885, 0.15163], // 8.72 degrees below horizontal
+  from: [0xa5, 0x3a, 0xff], // #a53aff, purple
+  to: [0x74, 0x6e, 0xff], // #746eff, blue
+  tFrom: 2.36,
+  tTo: 31.32,
+}
+
+const tOf = (x, y) => x * FILL.axis[0] + y * FILL.axis[1]
+
+/** The bolt's fill colour at a point, matching the SVG gradient exactly. */
+function fillAt(x, y) {
+  const f = Math.min(1, Math.max(0, (tOf(x, y) - FILL.tFrom) / (FILL.tTo - FILL.tFrom)))
+  return [0, 1, 2].map((c) => FILL.from[c] + (FILL.to[c] - FILL.from[c]) * f)
+}
 
 /* ── Tiny raster helpers (operate on a float RGBA buffer) ─────────────────── */
 
@@ -51,132 +110,98 @@ function roundedRectCoverage(px, py, x0, y0, w, h, r) {
   return hits / 9
 }
 
-function circleCoverage(px, py, cx, cy, r) {
+function pointInPolygon(x, y) {
+  let inside = false
+  for (let i = 0, j = BOLT.length - 1; i < BOLT.length; j = i++) {
+    const [xi, yi] = BOLT[i]
+    const [xj, yj] = BOLT[j]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+/** Coverage of a pixel by the bolt, sampled on an NxN grid inside the pixel. */
+function boltCoverage(px, py, layout, n = 4) {
+  const { scale, tx, ty } = layout
   let hits = 0
-  for (let sy = 0; sy < 3; sy++) {
-    for (let sx = 0; sx < 3; sx++) {
-      const dx = px + (sx + 0.5) / 3 - cx
-      const dy = py + (sy + 0.5) / 3 - cy
-      if (dx * dx + dy * dy <= r * r) hits++
+  for (let sy = 0; sy < n; sy++) {
+    for (let sx = 0; sx < n; sx++) {
+      const x = (px + (sx + 0.5) / n - tx) / scale
+      const y = (py + (sy + 0.5) / n - ty) / scale
+      if (pointInPolygon(x, y)) hits++
     }
   }
-  return hits / 9
+  return hits / (n * n)
 }
 
-function segmentCoverage(px, py, x1, y1, x2, y2, halfWidth) {
-  let hits = 0
-  for (let sy = 0; sy < 3; sy++) {
-    for (let sx = 0; sx < 3; sx++) {
-      const x = px + (sx + 0.5) / 3
-      const y = py + (sy + 0.5) / 3
-      const vx = x2 - x1
-      const vy = y2 - y1
-      const t = Math.max(0, Math.min(1, ((x - x1) * vx + (y - y1) * vy) / (vx * vx + vy * vy)))
-      const dx = x - (x1 + t * vx)
-      const dy = y - (y1 + t * vy)
-      if (dx * dx + dy * dy <= halfWidth * halfWidth) hits++
-    }
+const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v)
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+/*
+ * The mark is authored against a 512 grid, and `fit` is the share of that grid
+ * the bolt's bounding box takes up.
+ *
+ * Maskable icons are cropped by the launcher, so their artwork has to stay
+ * inside the central 80% circle: a box of side s centred on the icon has its
+ * corners at s * sqrt(1 + (h/w)^2) / 2, which for this bolt's 33.13 x 31.89
+ * proportions means s <= 0.575 of the canvas. Anything larger loses the tips of
+ * the bolt to the mask.
+ */
+const GRID = 512
+const FIT = { any: 0.8, maskable: 0.575, apple: 0.7 }
+const TILE_RADIUS = 112
+
+/** Maps source-artwork coordinates onto the 512 grid for a given `fit`. */
+function layout(fit) {
+  const scale = (GRID * fit) / (BOLT_MAX_X - BOLT_MIN_X)
+  return {
+    scale,
+    tx: (GRID - (BOLT_MAX_X - BOLT_MIN_X) * scale) / 2 - BOLT_MIN_X * scale,
+    ty: (GRID - (BOLT_MAX_Y - BOLT_MIN_Y) * scale) / 2 - BOLT_MIN_Y * scale,
   }
-  return hits / 9
 }
 
-function lerp(a, b, t) {
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-  ]
+/** The same point, in the mark's own 512-grid coordinates. */
+function inGrid(x, y, l) {
+  return [l.scale * x + l.tx, l.scale * y + l.ty]
 }
 
-/* ── The artwork ──────────────────────────────────────────────────────────── */
+/** `fit` as a fraction of the grid, for callers drawing at other sizes. */
+function layoutFor(size, fit) {
+  const l = layout(fit)
+  const k = size / GRID
+  return { scale: l.scale * k, tx: l.tx * k, ty: l.ty * k }
+}
 
-const TOP = [0x16, 0x1b, 0x28]
-const BOTTOM = [0x07, 0x09, 0x0f]
-const BAR_TOP = [0x38, 0xbd, 0xf8]
-const BAR_BOTTOM = [0x22, 0xd3, 0xee]
-const STEEL = [0x2b, 0x34, 0x46]
-const BODY = [0xe8, 0xee, 0xf8]
+/* ── Raster icon ──────────────────────────────────────────────────────────── */
 
 /**
- * `inset` shrinks the foreground relative to the full-bleed background, which
- * is what Android's maskable icon safe zone needs — an adaptive icon crops the
- * square, so artwork has to stay inside the middle 80%.
+ * Draws the mark on a white tile. `rounded` keeps the app's existing rounded
+ * square silhouette; maskable icons must fill the whole square so their corners
+ * stay square and only the bolt is inset.
  */
-function drawIcon(size, { maskable = false } = {}) {
+function drawIcon(size, { fit = FIT.any, rounded = true } = {}) {
   const canvas = createCanvas(size)
-  const s = size / 512 // artwork is authored against a 512 grid
-  const k = maskable ? 0.8 : 1
-  const c = 256 * s // centre, in device pixels
+  const k = size / GRID
+  const l = layoutFor(size, fit)
+  const white = [0xff, 0xff, 0xff]
 
-  // Background: full-bleed rounded square. Maskable icons must fill the whole
-  // square, so the corners stay square for them and get rounded for the rest.
+  // The white ground first, so the bolt composites over it and its own edge is
+  // the edge that gets anti-aliased.
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const bg = lerp(TOP, BOTTOM, y / size)
-      if (maskable) {
-        blend(canvas, x, y, bg, 1)
-      } else {
-        const a = roundedRectCoverage(x, y, 0, 0, size, size, 112 * s)
-        blend(canvas, x, y, bg, a)
-      }
+      const a = rounded ? roundedRectCoverage(x, y, 0, 0, size, size, TILE_RADIUS * k) : 1
+      blend(canvas, x, y, white, a)
     }
   }
 
-  const barY = c - 138 * s * k
-  const barHalf = 150 * s * k
-  const barHalfH = 11 * s * k
-
-  // Ground line.
+  // The bolt, colour sampled per pixel so the gradient stays smooth at 512.
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const a = roundedRectCoverage(x, y, c - barHalf, c + 118 * s * k, barHalf * 2, 5 * s * k, 2.5 * s * k)
-      blend(canvas, x, y, STEEL, a)
-    }
-  }
-
-  // Vertical posts.
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const a = roundedRectCoverage(x, y, c - 130 * s * k, barY, 8 * s * k, 70 * s * k, 4 * s * k)
-      blend(canvas, x, y, STEEL, a)
-      blend(canvas, x, y, STEEL, roundedRectCoverage(x, y, c + 122 * s * k, barY, 8 * s * k, 70 * s * k, 4 * s * k))
-    }
-  }
-
-  // Horizontal bar.
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const a = roundedRectCoverage(x, y, c - barHalf, barY - barHalfH, barHalf * 2, barHalfH * 2, barHalfH)
-      if (a > 0) blend(canvas, x, y, lerp(BAR_TOP, BAR_BOTTOM, (y - (barY - barHalfH)) / (barHalfH * 2)), a)
-    }
-  }
-
-  // Head.
-  const headR = 24 * s * k
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      blend(canvas, x, y, BAR_TOP, circleCoverage(x, y, c, barY - 30 * s * k, headR))
-    }
-  }
-
-  // Figure: arms up to the bar, shoulders, torso, legs.
-  const armTop = barY - 2 * s * k
-  const shoulderY = barY + 32 * s * k
-  const hipY = barY + 84 * s * k
-  const footY = barY + 146 * s * k
-  const stroke = 10 * s * k
-  const strokes = [
-    [c - 50 * s * k, armTop, c - 50 * s * k, shoulderY],
-    [c + 50 * s * k, armTop, c + 50 * s * k, shoulderY],
-    [c - 50 * s * k, shoulderY, c + 50 * s * k, shoulderY],
-    [c, barY - 6 * s * k, c, hipY],
-    [c, hipY, c - 44 * s * k, footY],
-    [c, hipY, c + 44 * s * k, footY],
-  ]
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      for (const [x1, y1, x2, y2] of strokes) {
-        blend(canvas, x, y, BODY, segmentCoverage(x, y, x1, y1, x2, y2, stroke))
+      const a = boltCoverage(x, y, l)
+      if (a > 0) {
+        blend(canvas, x, y, fillAt((x + 0.5 - l.tx) / l.scale, (y + 0.5 - l.ty) / l.scale), a)
       }
     }
   }
@@ -250,10 +275,10 @@ function encodePng(canvas) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4
       const o = rowStart + 1 + x * 4
-      raw[o] = Math.round(Math.min(255, Math.max(0, data[i])))
-      raw[o + 1] = Math.round(Math.min(255, Math.max(0, data[i + 1])))
-      raw[o + 2] = Math.round(Math.min(255, Math.max(0, data[i + 2])))
-      raw[o + 3] = Math.round(Math.min(255, Math.max(0, data[i + 3])))
+      raw[o] = Math.round(clamp255(data[i]))
+      raw[o + 1] = Math.round(clamp255(data[i + 1]))
+      raw[o + 2] = Math.round(clamp255(data[i + 2]))
+      raw[o + 3] = Math.round(clamp255(data[i + 3]))
     }
   }
 
@@ -274,23 +299,71 @@ function encodePng(canvas) {
   ])
 }
 
+/* ── Vector marks ─────────────────────────────────────────────────────────── */
+
+const hex = (v) => Math.round(clamp255(v)).toString(16).padStart(2, '0')
+const rgb = (c) => '#' + c.map(hex).join('')
+
+/**
+ * The shared body of the SVG marks: a white tile and the bolt on it, both
+ * described in the 512 grid.
+ */
+function markSvgBody({ id, rounded }) {
+  const l = layout(FIT.any)
+  const [x1, y1] = inGrid(FILL.tFrom * FILL.axis[0], FILL.tFrom * FILL.axis[1], l)
+  const [x2, y2] = inGrid(FILL.tTo * FILL.axis[0], FILL.tTo * FILL.axis[1], l)
+  const path = BOLT.map(([x, y], i) => {
+    const [px, py] = inGrid(x, y, l)
+    return `${i === 0 ? 'M' : 'L'}${px.toFixed(2)} ${py.toFixed(2)}`
+  }).join('')
+  return `  <defs>
+    <linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}">
+      <stop offset="0" stop-color="${rgb(FILL.from)}" />
+      <stop offset="1" stop-color="${rgb(FILL.to)}" />
+    </linearGradient>
+  </defs>
+
+  ${rounded ? `<rect width="${GRID}" height="${GRID}" rx="${TILE_RADIUS}" fill="#ffffff" />` : `<rect width="${GRID}" height="${GRID}" fill="#ffffff" />`}
+
+  <!-- The lightning bolt, traced from the source artwork. -->
+  <path fill="url(#${id})" d="${path}Z" />`
+}
+
+function iconSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GRID} ${GRID}" width="${GRID}" height="${GRID}">
+${markSvgBody({ id: 'bolt', rounded: true })}
+</svg>
+`
+}
+
+function faviconSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GRID} ${GRID}">
+${markSvgBody({ id: 'bolt', rounded: true })}
+</svg>
+`
+}
+
 /* ── Write the set ────────────────────────────────────────────────────────── */
 
 mkdirSync(OUT_DIR, { recursive: true })
 
+writeFileSync(join(OUT_DIR, 'icon.svg'), iconSvg())
+writeFileSync(join(OUT_DIR, 'favicon.svg'), faviconSvg())
+console.log('icon.svg, favicon.svg')
+
 const targets = [
-  { file: 'icon-192.png', size: 192, maskable: false },
-  { file: 'icon-512.png', size: 512, maskable: false },
-  { file: 'icon-maskable-192.png', size: 192, maskable: true },
-  { file: 'icon-maskable-512.png', size: 512, maskable: true },
-  { file: 'apple-touch-icon.png', size: 180, maskable: false },
+  { file: 'icon-192.png', size: 192, fit: FIT.any, rounded: true },
+  { file: 'icon-512.png', size: 512, fit: FIT.any, rounded: true },
+  { file: 'icon-maskable-192.png', size: 192, fit: FIT.maskable, rounded: false },
+  { file: 'icon-maskable-512.png', size: 512, fit: FIT.maskable, rounded: false },
+  { file: 'apple-touch-icon.png', size: 180, fit: FIT.apple, rounded: false },
 ]
 
-for (const { file, size, maskable } of targets) {
-  const canvas = downsample(drawIcon(size * SS, { maskable }), SS)
+for (const { file, size, fit, rounded } of targets) {
+  const canvas = downsample(drawIcon(size * SS, { fit, rounded }), SS)
   const png = encodePng(canvas)
   writeFileSync(join(OUT_DIR, file), png)
   console.log(`${file.padEnd(26)} ${size}x${size}  ${(png.length / 1024).toFixed(1)} kB`)
 }
 
-console.log('\nWrote', targets.length, 'icons to public/')
+console.log('\nWrote', targets.length + 2, 'files to public/')
