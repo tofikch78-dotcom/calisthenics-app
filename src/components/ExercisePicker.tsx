@@ -103,7 +103,7 @@ export function ExercisePicker({ savedIds, presentIds, onPick, onClose }: Exerci
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 pb-[calc(var(--app-nav-bottom-h,0px)+0.5rem)] backdrop-blur-sm sm:items-center sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Add an exercise"
@@ -111,6 +111,14 @@ export function ExercisePicker({ savedIds, presentIds, onPick, onClose }: Exerci
         if (event.target === event.currentTarget) onClose()
       }}
     >
+      {/*
+        The sheet is anchored to the bottom of the screen on a phone, and the
+        nav is fixed to the bottom of the screen too. Without clearing it here,
+        the bottom 52 pixels of the sheet — the last result and its Add button —
+        sat permanently under the nav, which is z-40 over this z-50 backdrop's
+        z-30 siblings, so those taps went to the nav instead. The bottom padding
+        on the wrapper above lifts the whole sheet clear of it.
+      */}
       <div className="animate-rise flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-ink-600 bg-ink-900 shadow-2xl sm:rounded-3xl">
         <header className="flex items-center gap-3 border-b border-ink-700 px-4 py-3">
           <h2 className="flex-1 text-sm font-semibold text-mist-100">Add an exercise</h2>

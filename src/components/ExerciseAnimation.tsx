@@ -154,6 +154,99 @@ export interface ExerciseAnimationProps {
 const FIRST_FRAME = 0
 const HOLD_SHARE = 0.28
 
+/*
+ * One requestAnimationFrame loop for every animation on the page.
+ *
+ * Each component used to own its own loop and called setState on every frame.
+ * A muscle list renders 24 of these, "show all" renders up to 94, and the
+ * exercise picker renders 131 more on top of whatever is already mounted —
+ * 225 loops, each committing a React update 60 times a second. That is around
+ * 13,000 updates per second, which on a phone starves the main thread: the
+ * list stutters while scrolling and taps land on whatever happened to be under
+ * the finger at that instant. Sharing one loop keeps the per-frame cost to one
+ * callback, and the visibility gate below stops offscreen figures from
+ * committing at all.
+ */
+type Tick = (now: number) => void
+
+const ticks = new Set<Tick>()
+let rafId: number | null = null
+
+function pump(now: number) {
+  rafId = requestAnimationFrame(pump)
+  // Snapshot: a tick may unsubscribe itself while the frame is being served.
+  for (const tick of Array.from(ticks)) tick(now)
+}
+
+function onTick(tick: Tick) {
+  ticks.add(tick)
+  if (rafId === null) rafId = requestAnimationFrame(pump)
+  return () => {
+    ticks.delete(tick)
+    if (!ticks.size && rafId !== null) {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
+  }
+}
+
+/**
+ * Only animate what is on screen. `rootMargin` starts the loop slightly before
+ * a figure scrolls in so it is already moving by the time it is readable, and
+ * keeps it alive a little after it leaves so a small scroll does not stall it.
+ */
+const VISIBILITY_MARGIN = '160px 0px'
+
+/** How long to wait for a first answer before animating anyway. */
+const ARM_MS = 400
+
+function useOnScreen(ref: React.RefObject<HTMLElement | null>, active: boolean) {
+  const [onScreen, setOnScreen] = useState(false)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      // No observer to ask: running is the safe answer.
+      setOnScreen(true)
+      return
+    }
+
+    let answered = false
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          answered = true
+          setOnScreen(entry.isIntersecting)
+        }
+      },
+      { rootMargin: VISIBILITY_MARGIN },
+    )
+    observer.observe(node)
+
+    /*
+     * Fail open.
+     *
+     * The observer normally answers within a frame, and gating on it is what
+     * turns a 200-figure page into a dozen live ones. But some environments
+     * withhold that first callback — a document that is not being rendered, an
+     * older embedded WebView — and a gate waiting on an answer that never
+     * arrives leaves a figure the user is looking at permanently still, which
+     * reads as a broken app rather than a saving. So after ARM_MS of silence,
+     * start animating and let the observer correct it the moment it speaks.
+     */
+    const arm = setTimeout(() => {
+      if (!answered) setOnScreen(true)
+    }, ARM_MS)
+
+    return () => {
+      observer.disconnect()
+      clearTimeout(arm)
+    }
+  }, [ref, active])
+
+  return onScreen
+}
+
 export function ExerciseAnimation({
   poses,
   duration = 1100,
@@ -168,33 +261,33 @@ export function ExerciseAnimation({
   const playing = controlled ? playingProp : playingLocal
   const setPlaying = controlled ? () => {} : setPlayingLocal
   const [frame, setFrame] = useState(FIRST_FRAME)
-  const rafRef = useRef<number | null>(null)
-  const startRef = useRef<number | null>(null)
+  const hostRef = useRef<HTMLElement | null>(null)
 
   const single = frames.length <= 1
+  const onScreen = useOnScreen(hostRef, playing && !single)
 
   useEffect(() => {
-    if (!playing || single) return
+    if (!playing || single || !onScreen) return
 
-    function tick(now: number) {
-      if (startRef.current == null) startRef.current = now
-      const elapsed = now - startRef.current
+    let last = Number.NaN
+    let start: number | null = null
+
+    return onTick((now) => {
+      if (start === null) start = now
+      const elapsed = now - start
       const cycle = duration * Math.max(1, frames.length - 1)
       // Ping-pong: forward, hold, back to the start, so the loop is seamless.
       const position = (elapsed / cycle) % 2
       const forward = position <= 1
       const value = forward ? position : 2 - position
-      setFrame(Math.min(1, HOLD_SHARE + value * (1 - HOLD_SHARE * 2)))
-      rafRef.current = requestAnimationFrame(tick)
-    }
-
-    rafRef.current = requestAnimationFrame(tick)
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-      startRef.current = null
-    }
-  }, [playing, single, duration, frames.length])
+      const next = Math.min(1, HOLD_SHARE + value * (1 - HOLD_SHARE * 2))
+      // A pose that has not visibly moved is not worth a commit. At 60Hz this
+      // drops roughly eight updates in ten across a page full of figures.
+      if (Math.abs(next - last) < 0.003) return
+      last = next
+      setFrame(next)
+    })
+  }, [playing, single, onScreen, duration, frames.length])
 
   const scene: Scene = frames[0]?.scene ?? 'floor'
   const from: Pose = frames[0] ?? frames[0]
@@ -202,7 +295,7 @@ export function ExerciseAnimation({
   const blended = frames.length ? interpolatePose(from, to, frames.length === 1 ? 0 : frame) : null
 
   return (
-    <figure className={className}>
+    <figure ref={hostRef} className={className}>
       <svg
         viewBox="0 0 200 200"
         className="h-full w-full"

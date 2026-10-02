@@ -208,6 +208,48 @@ export function exercisesForMuscle(muscle: Muscle, primaryOnly = false): Exercis
   )
 }
 
+/**
+ * Every exercise that trains any of a set of muscles.
+ *
+ * A workout is rarely one pattern — "Back + Biceps" is a pull session and
+ * "Legs + Glutes" is a hinge session — so the builder collects several muscles
+ * before it looks for movements. The union is keyed by exercise id before it is
+ * returned: an exercise whose primary is Back and whose secondaries include
+ * Biceps matches both selections, and listing it twice would offer the user the
+ * same movement twice with no indication that it is the same row.
+ *
+ * Order is the one that answers "what did I just ask for" fastest: a movement
+ * whose primary is one of the selections first, then in the order the muscles
+ * were selected, then alphabetically.
+ */
+export function exercisesForMuscles(muscles: readonly Muscle[], primaryOnly = false): Exercise[] {
+  if (!muscles.length) return []
+  const picked = new Set(muscles)
+
+  const rank = (exercise: Exercise) => {
+    if (!primaryOnly && picked.has(exercise.mainMuscle)) return 0
+    const at = muscles.findIndex((muscle) => targetsMuscle(exercise, muscle))
+    return at === -1 ? muscles.length : at
+  }
+
+  const unique = new Map<string, Exercise>()
+  for (const exercise of LIBRARY) {
+    if (primaryOnly ? picked.has(exercise.mainMuscle) : muscles.some((m) => targetsMuscle(exercise, m))) {
+      unique.set(exercise.id, exercise)
+    }
+  }
+
+  return [...unique.values()].sort((a, b) => {
+    const primaryA = picked.has(a.mainMuscle) ? 0 : 1
+    const primaryB = picked.has(b.mainMuscle) ? 0 : 1
+    return (
+      primaryA - primaryB ||
+      rank(a) - rank(b) ||
+      collator.compare(a.name, b.name)
+    )
+  })
+}
+
 /** How many exercises each muscle chip should advertise, built once. */
 export const MUSCLE_EXERCISE_COUNTS: Record<Muscle, { all: number; primary: number }> =
   Object.fromEntries(

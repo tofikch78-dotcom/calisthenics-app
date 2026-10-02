@@ -3,11 +3,12 @@ import { getExercise } from '../data'
 import { MUSCLES, MUSCLE_ORDER } from '../data/taxonomy'
 import { equipmentLabel, muscleLabel } from '../lib/labels'
 import {
-  exercisesForMuscle,
+  exercisesForMuscles,
   formatDosage,
   formatRest,
   MUSCLE_EXERCISE_COUNTS,
   queryLibrary,
+  targetsMuscle,
   type SortKey,
 } from '../lib/search'
 import { makeWorkoutItem, makeItemId, moveItem, newWorkoutDraft } from '../lib/store'
@@ -56,32 +57,131 @@ function Field({
   )
 }
 
-/* ── Step 1: which muscle group is this workout for? ───────────────────── */
+/* ── Step 1: which muscle groups is this workout for? ──────────────────── */
 
-/** The 12 muscle groups, in the same order as the library filter. */
-function MuscleStep({ onPick }: { onPick: (muscle: Muscle) => void }) {
+/**
+ * The 12 muscle groups, in the same order as the library filter.
+ *
+ * Picking one muscle did not match how people train. "Back + Biceps",
+ * "Chest + Shoulders + Triceps" and "Legs + Glutes" are single sessions, so the
+ * tiles are a multi-select: tapping adds, tapping again removes, and the tile
+ * says which it is so nothing has to be counted by eye. Choosing does not
+ * advance on its own — the user has to be able to keep adding.
+ */
+function MuscleStep({
+  selected,
+  onToggle,
+}: {
+  selected: readonly Muscle[]
+  onToggle: (muscle: Muscle) => void
+}) {
   return (
     <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
       {MUSCLE_ORDER.map((muscle) => {
         const counts = MUSCLE_EXERCISE_COUNTS[muscle]
+        const on = selected.includes(muscle)
         return (
           <li key={muscle}>
             <button
               type="button"
-              onClick={() => onPick(muscle)}
-              aria-label={`Choose ${MUSCLES[muscle].label}, ${counts.all} exercises`}
-              className="flex min-h-16 w-full flex-col items-start justify-center gap-0.5 rounded-xl border border-ink-700 bg-ink-850/70 p-3 text-left transition hover:border-brand-400/55 hover:bg-ink-800"
+              onClick={() => onToggle(muscle)}
+              aria-pressed={on}
+              aria-label={`${on ? 'Remove' : 'Choose'} ${MUSCLES[muscle].label}, ${counts.all} exercises`}
+              className={`flex min-h-16 w-full flex-col items-start justify-center gap-0.5 rounded-xl border p-3 text-left transition ${
+                on
+                  ? 'border-brand-400 bg-brand-500/12 ring-1 ring-brand-400/40'
+                  : 'border-ink-700 bg-ink-850/70 hover:border-brand-400/55 hover:bg-ink-800'
+              }`}
             >
               <span className="flex w-full items-center gap-1.5">
+                <span
+                  className={`grid size-4 shrink-0 place-items-center rounded-full border text-[9px] leading-none ${
+                    on
+                      ? 'border-brand-400 bg-brand-500 text-white'
+                      : 'border-ink-600 text-transparent'
+                  }`}
+                  aria-hidden="true"
+                >
+                  <IconCheck className="h-2.5 w-2.5" />
+                </span>
                 <MusclePill muscle={muscle} />
                 <span className="tnum ml-auto text-[11px] text-mist-400">{counts.all}</span>
               </span>
-              <span className="truncate text-[11px] text-mist-500">{MUSCLES[muscle].hint}</span>
+              <span className={`truncate text-[11px] ${on ? 'text-mist-300' : 'text-mist-500'}`}>
+                {MUSCLES[muscle].hint}
+              </span>
             </button>
           </li>
         )
       })}
     </ul>
+  )
+}
+
+/**
+ * What has been chosen so far, in one line, with a way out of each choice and a
+ * way forward. On a phone this is the only place the running answer is visible,
+ * so it states the count, the names, and how many movements that unlocks.
+ */
+function MuscleSummary({
+  selected,
+  total,
+  onRemove,
+  onContinue,
+}: {
+  selected: readonly Muscle[]
+  total: number
+  onRemove: (muscle: Muscle) => void
+  onContinue: () => void
+}) {
+  const empty = selected.length === 0
+  return (
+    <div
+      className={`mt-3 rounded-xl border px-3 py-2.5 ${
+        empty ? 'border-dashed border-ink-600 bg-ink-850/40' : 'border-ink-600 bg-ink-850/70'
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        {selected.map((muscle) => (
+          <span
+            key={muscle}
+            className="inline-flex items-center gap-1 rounded-lg bg-brand-500/15 py-1 pr-1 pl-2.5 text-xs font-medium text-brand-300 ring-1 ring-brand-400/30"
+          >
+            {MUSCLES[muscle].label}
+            <button
+              type="button"
+              onClick={() => onRemove(muscle)}
+              aria-label={`Remove ${MUSCLES[muscle].label} from this workout`}
+              className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2 before:content-['']"
+            >
+              <IconClose className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        {empty && (
+          <span className="text-xs text-mist-400">
+            Nothing picked yet — tap one or more muscle groups above.
+          </span>
+        )}
+      </div>
+
+      <p className="mt-2 text-[11px] text-mist-400">
+        {empty
+          ? 'Pick at least one muscle group to continue.'
+          : `${selected.length} ${selected.length === 1 ? 'muscle' : 'muscles'} selected · ${total} ${
+              total === 1 ? 'movement' : 'movements'
+            } to choose from`}
+      </p>
+
+      <button
+        type="button"
+        onClick={onContinue}
+        disabled={empty}
+        className="mt-2.5 min-h-11 w-full rounded-xl bg-brand-500 py-2.5 text-xs font-semibold text-white transition hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-ink-800 disabled:text-ink-500"
+      >
+        {empty ? 'Pick a muscle group first' : `Next · choose exercises (${total})`}
+      </button>
+    </div>
   )
 }
 
@@ -92,18 +192,23 @@ function MuscleStep({ onPick }: { onPick: (muscle: Muscle) => void }) {
  * name, primary muscle, secondaries, difficulty, equipment, recommended
  * dosage — so nothing has to be opened to decide.
  *
+ * `alsoTargets` is the other muscle groups this workout is for that the
+ * exercise also trains. With several muscles selected, that line is what tells
+ * the user this row serves two of their choices at once, instead of leaving them
+ * to compare it against the heading above.
+ *
  * The pause control and the "open details" button are siblings of the stretched
  * hit area rather than children of it, so the markup has no nested buttons.
  */
 function ExerciseChoice({
   exercise,
-  isPrimary,
+  alsoTargets,
   count,
   onToggle,
   onOpen,
 }: {
   exercise: Exercise
-  isPrimary: boolean
+  alsoTargets: readonly Muscle[]
   count: number
   onToggle: () => void
   onOpen: () => void
@@ -171,9 +276,11 @@ function ExerciseChoice({
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         <DifficultyBadge level={exercise.difficulty} />
         <Tag>{exercise.equipment.map(equipmentLabel).join(' · ')}</Tag>
-        <Tag className={isPrimary ? 'text-brand-300' : ''}>
-          {isPrimary ? 'Main mover here' : 'Works it too'}
-        </Tag>
+        {alsoTargets.length > 0 && (
+          <Tag className="text-brand-300">
+            Also trains {alsoTargets.map(muscleLabel).join(' · ')}
+          </Tag>
+        )}
       </div>
 
       <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-ink-700/80 pt-2.5">
@@ -417,8 +524,16 @@ function IconButton({
 
 type Step = 'muscle' | 'exercises'
 
-/** Rows rendered before the "show all" button appears. */
+/** Rows rendered per group before that group's "show more" appears. */
 const PAGE = 24
+
+/** One labelled block of the exercise list, so several muscles stay readable. */
+interface MuscleGroup {
+  key: string
+  title: string
+  hint: string
+  rows: Exercise[]
+}
 
 export interface WorkoutEditorProps {
   /** The saved workout being edited, or null while composing a new one. */
@@ -491,10 +606,21 @@ export function WorkoutEditor({
   // has to start. Opening a saved one lands on its numbers instead, with the
   // chooser a tap away — nobody edits a plan to be asked to re-plan it.
   const [chooserOpen, setChooserOpen] = useState(isNew)
-  const [muscle, setMuscle] = useState<Muscle | null>(null)
+  /*
+   * Several muscles, in the order they were tapped, because a session is
+   * usually more than one pattern. The list is the selection: it survives going
+   * back to step 1, coming forward again, and searching, so nothing the user
+   * chose is ever quietly dropped by navigating.
+   *
+   * A saved workout arrives with its own muscles already on, read off the
+   * exercises it holds. Someone opening a plan to add one movement should find
+   * the neighbours already listed — an empty muscle step would hide the rest of
+   * the session and make the chooser look broken.
+   */
+  const [selected, setSelected] = useState<Muscle[]>(() => musclesOf(draft.items))
   const [primaryOnly, setPrimaryOnly] = useState(false)
   const [query, setQuery] = useState('')
-  const [shown, setShown] = useState(PAGE)
+  const [limits, setLimits] = useState<Record<string, number>>({})
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const patch = (next: Partial<Workout>) => setDraft((current) => ({ ...current, ...next }))
@@ -502,14 +628,30 @@ export function WorkoutEditor({
   const startChoosing = (from: Step) => {
     setStep(from)
     setQuery('')
-    setShown(PAGE)
+    setLimits({})
     setChooserOpen(true)
   }
 
   /** Any change of list resets how much of it is expanded. */
   const changeList = (change: () => void) => {
     change()
-    setShown(PAGE)
+    setLimits({})
+  }
+
+  const toggleMuscle = (muscle: Muscle) =>
+    setSelected((current) =>
+      current.includes(muscle)
+        ? current.filter((entry) => entry !== muscle)
+        : [...current, muscle],
+    )
+
+  const removeMuscle = (muscle: Muscle) =>
+    setSelected((current) => current.filter((entry) => entry !== muscle))
+
+  const goToExercises = () => {
+    setStep('exercises')
+    setQuery('')
+    setLimits({})
   }
 
   /** How many times each exercise is in the draft, for the Added ×n badge. */
@@ -520,28 +662,66 @@ export function WorkoutEditor({
   }, [draft.items])
 
   /*
-   * With a muscle chosen the list is that muscle's exercises and nothing else.
-   * Typing a search deliberately overrides it, so a user who half-remembers
-   * "the ring one" is never trapped behind the filter they already picked.
+   * With muscles chosen the list is the union of their exercises and nothing
+   * else. Typing a search deliberately overrides it, so a user who
+   * half-remembers "the ring one" is never trapped behind the filter they
+   * already picked.
    */
+  const searching = query.trim().length > 0
   const candidates = useMemo(() => {
-    if (!query.trim()) {
-      if (!muscle) return []
-      return exercisesForMuscle(muscle, primaryOnly)
+    if (searching) {
+      return queryLibrary(
+        {
+          query,
+          muscles: [],
+          movements: [],
+          difficulties: [],
+          equipment: [],
+          onlySaved: false,
+          sort: 'name' as SortKey,
+        },
+        savedIds,
+      )
     }
-    return queryLibrary(
-      {
-        query,
-        muscles: [],
-        movements: [],
-        difficulties: [],
-        equipment: [],
-        onlySaved: false,
-        sort: 'name' as SortKey,
-      },
-      savedIds,
-    )
-  }, [query, muscle, primaryOnly, savedIds])
+    return exercisesForMuscles(selected, primaryOnly)
+  }, [searching, query, selected, primaryOnly, savedIds])
+
+  /*
+   * With more than one muscle selected a flat list stops being readable — 94
+   * rows under one heading tells you nothing about why each one is there. So the
+   * muscle-driven list is grouped: one block per selected muscle holding the
+   * movements it is the primary driver of, then a closing block for the
+   * movements that merely help one of the picks.
+   *
+   * An exercise lands in exactly one block. `exercisesForMuscles` already
+   * deduplicates by id, and this assigns by primary muscle, so nothing is
+   * offered twice and nothing is silently dropped between blocks.
+   */
+  const groups = useMemo<MuscleGroup[] | null>(() => {
+    if (searching || !selected.length) return null
+    const blocks: MuscleGroup[] = selected.map((muscle) => ({
+      key: muscle,
+      title: MUSCLES[muscle].label,
+      hint: `primary mover · ${MUSCLE_EXERCISE_COUNTS[muscle].primary} movements`,
+      rows: candidates.filter((exercise) => exercise.mainMuscle === muscle),
+    }))
+    const helpers = candidates.filter((exercise) => !selected.includes(exercise.mainMuscle))
+    if (helpers.length) {
+      blocks.push({
+        key: '__helpers',
+        title: 'Also helps',
+        hint: `works a chosen muscle as a helper · ${helpers.length} movements`,
+        rows: helpers,
+      })
+    }
+    return blocks.filter((block) => block.rows.length)
+  }, [searching, selected, candidates])
+
+  /** How many rows of a block are revealed. */
+  const limitOf = (key: string) => limits[key] ?? PAGE
+
+  const revealMore = (key: string, total: number) =>
+    setLimits((current) => ({ ...current, [key]: Math.min(total, (current[key] ?? PAGE) + PAGE * 2) }))
 
   /*
    * A broad muscle can match 90-odd exercises, and every row is a card with an
@@ -549,8 +729,8 @@ export function WorkoutEditor({
    * list the user scrolls past anyway, so the first page shows and the rest is
    * one tap away. Nothing is hidden — the count is always stated.
    */
-  const visible = candidates.slice(0, shown)
-  const hidden = candidates.length - visible.length
+  const alsoFor = (exercise: Exercise) =>
+    selected.filter((muscle) => muscle !== exercise.mainMuscle && targetsMuscle(exercise, muscle))
 
   const addExercise = (exercise: Exercise) =>
     setDraft((current) => ({
@@ -558,18 +738,19 @@ export function WorkoutEditor({
       items: [...current.items, makeWorkoutItem(exercise, current.items.length)],
     }))
 
+  /*
+   * One tap adds one copy, one tap removes one copy. Removing every copy at
+   * once used to fight the duplicate button: duplicating a movement gave it
+   * "Added ×2", and the next tap on that row deleted both.
+   */
   const toggleExercise = (exercise: Exercise) =>
-    setDraft((current) =>
-      current.items.some((item) => item.exerciseId === exercise.id)
-        ? {
-            ...current,
-            items: current.items.filter((item) => item.exerciseId !== exercise.id),
-          }
-        : {
-            ...current,
-            items: [...current.items, makeWorkoutItem(exercise, current.items.length)],
-          },
-    )
+    setDraft((current) => {
+      const at = current.items.findIndex((item) => item.exerciseId === exercise.id)
+      if (at === -1) {
+        return { ...current, items: [...current.items, makeWorkoutItem(exercise, current.items.length)] }
+      }
+      return { ...current, items: current.items.filter((_, index) => index !== at) }
+    })
 
   const updateItem = (id: string, itemPatch: Partial<WorkoutItem>) =>
     setDraft((current) => ({
@@ -610,7 +791,7 @@ export function WorkoutEditor({
         </h2>
         <p className="mt-1 text-xs text-mist-400">
           {isNew
-            ? 'Nothing is pre-set for you. Pick a muscle, choose the exercises, set the numbers, then save.'
+            ? 'Nothing is pre-set for you. Pick your muscle groups, choose the exercises, set the numbers, then save.'
             : 'Changes are only written when you press Save — nothing is stored until then.'}
         </p>
       </div>
@@ -647,20 +828,19 @@ export function WorkoutEditor({
       {chooserOpen && step === 'muscle' && (
         <section className="mb-5">
           <SectionHeading hint={isNew ? 'Step 1 of 2' : undefined}>
-            {isNew ? '1 · Choose a muscle group' : 'Add exercises — choose a muscle group'}
+            {isNew ? '1 · Choose your muscle groups' : 'Add exercises — choose muscle groups'}
           </SectionHeading>
-          <MuscleStep
-            onPick={(chosen) => {
-              setMuscle(chosen)
-              setQuery('')
-              setShown(PAGE)
-              setStep('exercises')
-            }}
+          <MuscleStep selected={selected} onToggle={toggleMuscle} />
+          <MuscleSummary
+            selected={selected}
+            total={selected.length ? exercisesForMuscles(selected, primaryOnly).length : 0}
+            onRemove={removeMuscle}
+            onContinue={goToExercises}
           />
-          <div className="mt-3 flex flex-col gap-2">
+          <div className="mt-2 flex flex-col gap-2">
             <button
               type="button"
-              onClick={() => setStep('exercises')}
+              onClick={goToExercises}
               className="min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/40 hover:text-brand-300"
             >
               Skip — search the whole library instead
@@ -684,8 +864,17 @@ export function WorkoutEditor({
             {isNew ? '2 · Choose your exercises' : 'Add exercises — choose which ones'}
           </SectionHeading>
 
-          {/* The list is long; this keeps the way back to the numbers in reach. */}
-          <div className="sticky top-1 z-20 mb-3 flex items-center gap-2 rounded-xl border border-ink-600 bg-ink-900/95 px-2.5 py-1 backdrop-blur">
+          {/*
+            This bar used to sit at `sticky top-1`, a fixed guess that ignored the
+            desktop nav entirely — 41 of its 54 pixels ended up underneath it, so
+            the "Done choosing" button was half covered and the count was
+            unreadable. Offsetting by the measured nav height keeps the two
+            sticky bars from fighting over the top of the viewport on any screen.
+          */}
+          <div
+            style={{ top: 'calc(var(--app-nav-top-h, 0px) + 0.25rem)' }}
+            className="sticky z-20 mb-3 flex items-center gap-2 rounded-xl border border-ink-600 bg-ink-900/95 px-2.5 py-1 backdrop-blur"
+          >
             <span className="tnum text-[11px] text-mist-300">
               {draft.items.length} selected
             </span>
@@ -699,68 +888,65 @@ export function WorkoutEditor({
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            {muscle ? (
-              <>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500/15 px-2.5 py-1.5 text-xs font-medium text-brand-300 ring-1 ring-brand-400/30">
-                  {MUSCLES[muscle].label}
-                  <button
-                    type="button"
-                    onClick={() => setMuscle(null)}
-                    aria-label="Change the muscle group"
-                    className="relative -mr-1.5 rounded p-0.5 text-brand-300/80 hover:text-brand-200 before:absolute before:-inset-3 before:content-['']"
-                  >
-                    <IconClose className="h-3 w-3" />
-                  </button>
-                </span>
+            {selected.map((muscle) => (
+              <span
+                key={muscle}
+                className="inline-flex items-center gap-1 rounded-lg bg-brand-500/15 py-1 pr-1 pl-2.5 text-xs font-medium text-brand-300 ring-1 ring-brand-400/30"
+              >
+                {MUSCLES[muscle].label}
                 <button
                   type="button"
-                  onClick={() => setStep('muscle')}
-                  className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-xs text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
+                  onClick={() => changeList(() => removeMuscle(muscle))}
+                  aria-label={`Remove ${MUSCLES[muscle].label} from this workout`}
+                  className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2 before:content-['']"
                 >
-                  Change muscle
+                  <IconClose className="h-3 w-3" />
                 </button>
-                <div className="flex overflow-hidden rounded-lg border border-ink-600">
-                  <button
-                    type="button"
-                    onClick={() => changeList(() => setPrimaryOnly(false))}
-                    aria-pressed={!primaryOnly}
-                    className={`min-h-11 px-2.5 text-[11px] font-medium transition ${
-                      primaryOnly ? 'text-mist-400' : 'bg-ink-800 text-mist-100'
-                    }`}
-                  >
-                    All {MUSCLE_EXERCISE_COUNTS[muscle].all}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => changeList(() => setPrimaryOnly(true))}
-                    aria-pressed={primaryOnly}
-                    className={`min-h-11 px-2.5 text-[11px] font-medium transition ${
-                      primaryOnly ? 'bg-ink-800 text-mist-100' : 'text-mist-400'
-                    }`}
-                  >
-                    Primary only {MUSCLE_EXERCISE_COUNTS[muscle].primary}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={() => setStep('muscle')}
+              className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-xs text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
+            >
+              {selected.length ? 'Change muscles' : 'Pick muscle groups'}
+            </button>
+            {selected.length > 0 && (
+              <div className="flex overflow-hidden rounded-lg border border-ink-600">
                 <button
                   type="button"
-                  onClick={() => setStep('muscle')}
-                  className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-xs text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
+                  onClick={() => changeList(() => setPrimaryOnly(false))}
+                  aria-pressed={!primaryOnly}
+                  className={`min-h-11 px-2.5 text-[11px] font-medium transition ${
+                    primaryOnly ? 'text-mist-400' : 'bg-ink-800 text-mist-100'
+                  }`}
                 >
-                  Pick a muscle group
+                  All {candidates.length}
                 </button>
-                {!isNew && (
-                  <button
-                    type="button"
-                    onClick={() => setChooserOpen(false)}
-                    className="min-h-11 rounded-lg px-2.5 py-1 text-xs text-mist-400 transition hover:text-mist-100"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </>
+                <button
+                  type="button"
+                  onClick={() => changeList(() => setPrimaryOnly(true))}
+                  aria-pressed={primaryOnly}
+                  className={`min-h-11 px-2.5 text-[11px] font-medium transition ${
+                    primaryOnly ? 'bg-ink-800 text-mist-100' : 'text-mist-400'
+                  }`}
+                >
+                  Primary only{' '}
+                  {selected.reduce(
+                    (sum, muscle) => sum + MUSCLE_EXERCISE_COUNTS[muscle].primary,
+                    0,
+                  )}
+                </button>
+              </div>
+            )}
+            {!isNew && (
+              <button
+                type="button"
+                onClick={() => setChooserOpen(false)}
+                className="min-h-11 rounded-lg px-2.5 py-1 text-xs text-mist-400 transition hover:text-mist-100"
+              >
+                Cancel
+              </button>
             )}
           </div>
 
@@ -776,10 +962,10 @@ export function WorkoutEditor({
             />
           </div>
 
-          {query.trim() && (
+          {searching && (
             <p className="mb-2 text-[11px] text-mist-400">
-              {muscle
-                ? 'Searching all 131 exercises, not just this muscle'
+              {selected.length
+                ? 'Searching all 131 exercises, not just your muscles'
                 : 'Searching all 131 exercises'} — {candidates.length} match
               {candidates.length === 1 ? '' : 'es'}.
             </p>
@@ -788,33 +974,57 @@ export function WorkoutEditor({
           {candidates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-ink-600 bg-ink-850/40 px-6 py-10 text-center">
               <p className="text-sm text-mist-400">
-                {query.trim() ? `Nothing matches “${query.trim()}”.` : 'No exercises to show.'}
+                {searching
+                  ? `Nothing matches “${query.trim()}”.`
+                  : 'No exercises to show.'}
               </p>
             </div>
           ) : (
-            <>
-              <ul className="space-y-2.5">
-                {visible.map((exercise) => (
-                  <ExerciseChoice
-                    key={exercise.id}
-                    exercise={exercise}
-                    isPrimary={exercise.mainMuscle === muscle}
-                    count={counts.get(exercise.id) ?? 0}
-                    onToggle={() => toggleExercise(exercise)}
-                    onOpen={() => onOpenExercise(exercise)}
-                  />
-                ))}
-              </ul>
-              {hidden > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShown(candidates.length)}
-                  className="mt-3 min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
-                >
-                  Show the other {hidden} ({candidates.length} total)
-                </button>
-              )}
-            </>
+            <div className="space-y-5">
+              {(groups ?? [
+                {
+                  key: '__all',
+                  title: searching ? 'Search results' : 'Exercises',
+                  hint: `${candidates.length} ${candidates.length === 1 ? 'movement' : 'movements'}`,
+                  rows: candidates,
+                },
+              ]).map((group) => {
+                const limit = limitOf(group.key)
+                const rows = group.rows.slice(0, limit)
+                const hidden = group.rows.length - rows.length
+                return (
+                  <div key={group.key}>
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-2">
+                      <h4 className="text-xs font-semibold tracking-[0.12em] text-mist-200 uppercase">
+                        {group.title}
+                      </h4>
+                      <span className="text-[11px] text-mist-400">{group.hint}</span>
+                    </div>
+                    <ul className="space-y-2.5">
+                      {rows.map((exercise) => (
+                        <ExerciseChoice
+                          key={exercise.id}
+                          exercise={exercise}
+                          alsoTargets={alsoFor(exercise)}
+                          count={counts.get(exercise.id) ?? 0}
+                          onToggle={() => toggleExercise(exercise)}
+                          onOpen={() => onOpenExercise(exercise)}
+                        />
+                      ))}
+                    </ul>
+                    {hidden > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => revealMore(group.key, group.rows.length)}
+                        className="mt-3 min-h-11 w-full rounded-xl border border-ink-600 py-2.5 text-xs font-medium text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
+                      >
+                        Show the other {hidden} in {group.title} ({group.rows.length} total)
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </section>
       )}
@@ -848,7 +1058,8 @@ export function WorkoutEditor({
             <IconDumbbell className="mx-auto h-7 w-7 text-mist-400" />
             <h3 className="mt-3 text-sm font-semibold text-mist-100">No exercises yet</h3>
             <p className="mx-auto mt-1 max-w-sm text-sm text-mist-400">
-              Pick a muscle above and add the exercises you want. You control every set, rep, hold,
+              Pick your muscle groups above and add the exercises you want. You control every set,
+              rep, hold,
               rest and weight.
             </p>
           </div>
@@ -888,7 +1099,17 @@ export function WorkoutEditor({
           />
         </label>
 
-        <div className="sticky bottom-20 z-30 -mx-4 mt-4 border-t border-ink-700 bg-ink-950/92 px-4 py-3 backdrop-blur md:bottom-4">
+        {/*
+          `bottom-20` was a guess at the nav's height. It was wrong the moment
+          a phone with a home indicator added its inset, and the bar is z-30
+          under a z-40 nav, so the Save button slid underneath the navigation
+          and stopped being tappable. Offsetting by the measured nav height
+          keeps the gap whatever the device.
+        */}
+        <div
+          style={{ bottom: 'calc(var(--app-nav-bottom-h, 0px) + 0.75rem)' }}
+          className="sticky z-30 -mx-4 mt-4 border-t border-ink-700 bg-ink-950/92 px-4 py-3 backdrop-blur"
+        >
           <div className="flex items-center gap-2">
             {!isNew && onDuplicate && (
               <Button variant="outline" onClick={onDuplicate} className="min-h-11 shrink-0">
@@ -928,14 +1149,28 @@ export function WorkoutEditor({
   )
 }
 
-/** A name the user did not have to invent, built from what they picked. */
-function suggestedName(draft: Workout): string {
-  const muscles = new Set(
-    draft.items
+/**
+ * The distinct muscles a set of items is built around, in the same order the
+ * picker lays its tiles out. Used to name a workout and to seed the muscle step
+ * of an existing one, so both agree on what the session is.
+ */
+function musclesOf(items: WorkoutItem[]): Muscle[] {
+  const seen = new Set(
+    items
       .map((item) => getExercise(item.exerciseId)?.mainMuscle)
       .filter((muscle): muscle is Muscle => Boolean(muscle)),
   )
-  if (muscles.size === 0) return 'New workout'
-  if (muscles.size === 1) return `${muscleLabel([...muscles][0])} day`
-  return `${muscles.size}-muscle workout`
+  return MUSCLE_ORDER.filter((muscle) => seen.has(muscle))
+}
+
+/** A name the user did not have to invent, built from what they picked. */
+function suggestedName(draft: Workout): string {
+  const muscles = musclesOf(draft.items)
+  if (muscles.length === 0) return 'New workout'
+  const labels = muscles.map(muscleLabel)
+  if (labels.length === 1) return `${labels[0]} day`
+  // A multi-muscle session is named for its parts, so the plan reads correctly
+  // before anyone opens it: "Back + Biceps day".
+  if (labels.length <= 3) return `${labels.join(' + ')} day`
+  return `${labels.slice(0, 3).join(' + ')} +${labels.length - 3} day`
 }

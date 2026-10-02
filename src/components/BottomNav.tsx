@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { ComponentType } from 'react'
 import { IconChart, IconGear, IconHome, IconLeaf } from './kit'
 import { IconBook, IconDumbbell } from './ui'
@@ -34,10 +35,45 @@ export function BottomNav({
   /** Small dots on a tab, e.g. an un-finished session. */
   badges?: Partial<Record<Tab, boolean>>
 }) {
+  const topRef = useRef<HTMLElement | null>(null)
+  const bottomRef = useRef<HTMLElement | null>(null)
+
+  /*
+   * Publish how much room each nav takes, so anything sticky or anchored to an
+   * edge can clear it. The two bars swap at the md breakpoint, and the mobile
+   * one grows by the home-indicator inset, so the number cannot be guessed from
+   * the stylesheet — it has to be measured, and re-measured when either bar
+   * changes size.
+   *
+   * Without this, sticky toolbars pick a hard-coded offset that collides with
+   * the nav on one side or the other: the builder's own bar was pinned 4px from
+   * the top and ended up 41px underneath the desktop nav, and the exercise
+   * picker sat 52px underneath the phone nav with its last row unreachable.
+   */
+  useEffect(() => {
+    const root = document.documentElement
+    const measure = () => {
+      root.style.setProperty('--app-nav-top-h', `${topRef.current?.offsetHeight ?? 0}px`)
+      root.style.setProperty('--app-nav-bottom-h', `${bottomRef.current?.offsetHeight ?? 0}px`)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    if (topRef.current) observer?.observe(topRef.current)
+    if (bottomRef.current) observer?.observe(bottomRef.current)
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+    }
+  }, [])
+
   return (
     <>
       {/* Mobile: fixed to the bottom */}
       <nav
+        ref={bottomRef}
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/95 backdrop-blur-xl md:hidden"
       >
@@ -75,6 +111,7 @@ export function BottomNav({
 
       {/* Desktop: sticky top bar */}
       <nav
+        ref={topRef}
         aria-label="Main"
         className="sticky top-0 z-40 hidden border-b border-ink-700 bg-ink-950/85 backdrop-blur-xl md:block"
       >
