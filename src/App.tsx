@@ -56,7 +56,7 @@ export default function App() {
   const { workouts, saveWorkout, deleteWorkout, duplicateWorkout } = useWorkouts()
   const { sessions, addSession, updateSession, editSession, deleteSession } = useSessions()
   const { records, addRecord, deleteRecord } = useRecords()
-  const { days, updateDay, addMeal, updateMeal, deleteMeal } = useNutrition()
+  const { days, addMeal, updateMeal, deleteMeal, addWater, updateWater, removeWater } = useNutrition()
   const { targets, setTargets } = useNutritionTargets()
   const { entries: weightLog, logWeight, deleteWeight } = useWeightLog()
   const { progress: skillProgress, setStage } = useSkillProgress()
@@ -423,7 +423,9 @@ export default function App() {
             onAddMeal={addMeal}
             onUpdateMeal={updateMeal}
             onDeleteMeal={deleteMeal}
-            onUpdateDay={updateDay}
+            onAddWater={addWater}
+            onUpdateWater={updateWater}
+            onRemoveWater={removeWater}
           />
         )}
 

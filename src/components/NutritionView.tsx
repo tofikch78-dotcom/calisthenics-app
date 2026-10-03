@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { addDays, relativeDay, todayKey } from '../lib/dates'
+import { addDays, relativeDay, todayKey, DAY_SHORT, fromDateKey, formatDateKey } from '../lib/dates'
 import {
   ALL_MEAL_SLOTS,
   DIET_LABEL,
@@ -8,7 +8,16 @@ import {
   sumMacros,
   type MacroTotals,
 } from '../lib/nutrition'
-import type { FoodItem, Meal, MealSlot, NutritionDay, NutritionTargets, Profile } from '../types'
+import { dayHasData, sortedWater, waterEntries, waterTotal } from '../lib/nutrition-day'
+import type {
+  FoodItem,
+  Meal,
+  MealSlot,
+  NutritionDay,
+  NutritionTargets,
+  Profile,
+  WaterEntry,
+} from '../types'
 import {
   Card,
   Chip,
@@ -31,10 +40,10 @@ export interface NutritionViewProps {
   onAddMeal: (date: string, meal: Meal) => void
   onUpdateMeal: (date: string, mealId: string, patch: Partial<Meal>) => void
   onDeleteMeal: (date: string, mealId: string) => void
-  onUpdateDay: (date: string, patch: Partial<Omit<NutritionDay, 'date'>>) => void
+  onAddWater: (date: string, ml: number) => void
+  onUpdateWater: (date: string, entryId: string, patch: Partial<Omit<WaterEntry, 'id'>>) => void
+  onRemoveWater: (date: string, entryId: string) => void
 }
-
-const WATER_STEP = 250
 
 /**
  * A ready-made food row. Values are typical per serving, so tapping a
@@ -152,10 +161,14 @@ export function NutritionView({
   onAddMeal,
   onUpdateMeal,
   onDeleteMeal,
-  onUpdateDay,
+  onAddWater,
+  onUpdateWater,
+  onRemoveWater,
 }: NutritionViewProps) {
   const [date, setDate] = useState(todayKey())
   const [editing, setEditing] = useState<{ date: string; meal: Meal } | null>(null)
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customMl, setCustomMl] = useState(0)
 
   const auto = useMemo(() => autoTargets(profile), [profile])
   // In auto mode the numbers come from the profile; the stored values are only
@@ -169,8 +182,27 @@ export function NutritionView({
     [day],
   )
 
+  // The strip always ends on the selected day, so walking back with ← keeps
+  // following the view instead of snapping back to today.
+  const stripDays = useMemo(() => {
+    const end = date > todayKey() ? date : todayKey()
+    return Array.from({ length: 7 }, (_, index) => addDays(end, index - 6))
+  }, [date])
+
+  const loggedDates = useMemo(
+    () => new Set(days.filter((entry) => dayHasData(entry)).map((entry) => entry.date)),
+    [days],
+  )
+
   // Every slot is always offered; ones the user has used are simply non-empty.
+  // Building all seven lists once per render beats recomputing a slot's list
+  // twice inside the row that needs it.
   const slots = ALL_MEAL_SLOTS
+  const slotsFor = useMemo(() => {
+    const map: Partial<Record<MealSlot, FoodSuggestion[]>> = {}
+    for (const slot of ALL_MEAL_SLOTS) map[slot.id] = suggestionsFor(profile, slot.id)
+    return map
+  }, [profile])
 
   const macroRows: { label: string; current: number; target: number; unit: string; tone: 'ok' | 'warn' | 'brand' }[] = [
     { label: 'Calories', current: totals.kcal, target: effective.kcal, unit: 'kcal', tone: 'brand' },
@@ -179,12 +211,48 @@ export function NutritionView({
     { label: 'Fat', current: totals.fat, target: effective.fat, unit: 'g', tone: 'brand' },
   ]
 
-  const waterDone = day?.waterMl ?? 0
+  const drinks = useMemo(() => sortedWater(waterEntries(day)), [day])
+  const waterDone = waterTotal(drinks)
   const waterTarget = effective.waterMl
   const eatenMeals = day?.meals.filter((meal) => meal.done).length ?? 0
 
   return (
     <div className="space-y-4">
+      {/*
+        A week at a glance. The arrows alone meant reaching last month took
+        thirty taps with no way to tell which days held anything, so each cell
+        shows a dot for a day that has been logged and the row acts as a direct
+        jump. It sits outside the card because seven comfortable cells need the
+        full width of the screen, not a card's padding.
+      */}
+      <div className="-mx-4 flex gap-1 pb-1" role="group" aria-label="Jump to a day">
+        {stripDays.map((key) => {
+          const selected = key === date
+          const parsed = fromDateKey(key)
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setDate(key)}
+              aria-pressed={selected}
+              aria-label={`${formatDateKey(key)}${loggedDates.has(key) ? ', has entries' : ''}`}
+              title={formatDateKey(key)}
+              className={`flex min-h-11 flex-1 flex-col items-center justify-center rounded-lg border text-[10px] transition ${
+                selected
+                  ? 'border-brand-400/50 bg-brand-500/12 text-brand-200'
+                  : 'border-ink-700 bg-ink-900/40 text-mist-400 hover:border-ink-500'
+              }`}
+            >
+              <span className="font-medium">{DAY_SHORT[parsed.getDay()]}</span>
+              <span className="tnum text-[13px] font-semibold">{parsed.getDate()}</span>
+              <span
+                className={`mt-0.5 h-1 w-1 rounded-full ${loggedDates.has(key) ? 'bg-brand-300' : 'bg-transparent'}`}
+              />
+            </button>
+          )
+        })}
+      </div>
+
       <Card>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -218,6 +286,22 @@ export function NutritionView({
             </button>
           </div>
         </div>
+
+        <label className="mb-3 flex min-h-11 items-center justify-between gap-2 rounded-xl border border-ink-700 bg-ink-900/40 px-3">
+          <span className="text-[11px] text-mist-400">
+            {loggedDates.size} {loggedDates.size === 1 ? 'day' : 'days'} logged so far
+          </span>
+          <input
+            type="date"
+            value={date}
+            max={todayKey()}
+            onChange={(event) => {
+              if (event.target.value) setDate(event.target.value)
+            }}
+            aria-label="Pick a day"
+            className="tnum min-h-11 rounded-lg border border-ink-600 bg-ink-850 px-2 text-[11px] text-mist-200"
+          />
+        </label>
 
         {targets.auto ? (
           <p className="mb-3 rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11px] text-mist-400">
@@ -278,24 +362,75 @@ export function NutritionView({
             label={`Water: ${waterDone} of ${waterTarget} ml`}
           />
           <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => onUpdateDay(date, { waterMl: Math.max(0, waterDone - WATER_STEP) })}
-              className="min-h-11 rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
-            >
-              −{WATER_STEP} ml
-            </button>
             {[250, 500, 750].map((amount) => (
               <button
                 key={amount}
                 type="button"
-                onClick={() => onUpdateDay(date, { waterMl: waterDone + amount })}
+                onClick={() => onAddWater(date, amount)}
+                aria-label={`Log ${amount} millilitres of water`}
                 className="min-h-11 rounded-lg border border-brand-400/30 bg-brand-500/8 px-3 py-1.5 text-[11px] font-medium text-brand-300 transition hover:bg-brand-500/15"
               >
                 +{amount} ml
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setCustomOpen((open) => !open)}
+              aria-expanded={customOpen}
+              aria-label="Log a custom amount of water"
+              className="min-h-11 rounded-lg border border-ink-600 px-3 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
+            >
+              Custom…
+            </button>
           </div>
+
+          {customOpen && (
+            <div className="mt-2 flex items-end gap-2">
+              <NumberField
+                label="Custom amount"
+                suffix="ml"
+                className="min-h-11"
+                value={customMl}
+                onChange={(event) => setCustomMl(Math.max(0, Number(event.target.value) || 0))}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  onAddWater(date, customMl)
+                  setCustomMl(0)
+                  setCustomOpen(false)
+                }}
+                disabled={customMl <= 0}
+                className="min-h-11 rounded-lg bg-brand-500 px-4 text-xs font-semibold text-white transition hover:bg-brand-400 disabled:opacity-40"
+              >
+                Log it
+              </button>
+            </div>
+          )}
+
+          {/*
+            One row per drink. A single running total could only be changed by
+            tapping backwards in 250 ml steps, so a mis-tap had to be undone as
+            many times as it was made, and an exact bottle could not be recorded
+            at all. Tapping a row corrects that one drink.
+          */}
+          {drinks.length > 0 && (
+            <div className="mt-3 border-t border-ink-700 pt-2">
+              <p className="mb-1 text-[10px] tracking-wider text-mist-500 uppercase">
+                Drinks · tap one to correct it
+              </p>
+              <ul className="space-y-1">
+                {drinks.map((entry) => (
+                  <WaterRow
+                    key={entry.id}
+                    entry={entry}
+                    onUpdate={(patch) => onUpdateWater(date, entry.id, patch)}
+                    onRemove={() => onRemoveWater(date, entry.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         <p className="tnum mt-2 text-[11px] text-mist-500">
@@ -347,7 +482,9 @@ export function NutritionView({
 
                 {meals.length === 0 ? (
                   <p className="mt-2 text-[11px] text-mist-500">
-                    Nothing logged. {suggestionsFor(profile, slot.id)[0] ? `Try “${suggestionsFor(profile, slot.id)[0].name}”.` : ''}
+                    {slotsFor[slot.id]?.[0]
+                      ? `Nothing logged. Try “${slotsFor[slot.id]![0].name}”.`
+                      : 'Nothing logged.'}
                   </p>
                 ) : (
                   <ul className="mt-2 space-y-1.5">
@@ -361,18 +498,29 @@ export function NutritionView({
                             meal.done ? 'bg-lime-glow/8' : 'bg-ink-850/60'
                           }`}
                         >
+                          {/*
+                            The tick was a 20 px box — the smallest hit area in
+                            the app, on the control most likely to be hit by
+                            accident or missed entirely. The button now carries
+                            the 44 px target and the box sits inside it.
+                          */}
                           <button
                             type="button"
                             role="checkbox"
                             aria-checked={meal.done}
+                            aria-label={`${meal.done ? 'Unmark' : 'Mark'} ${meal.name || 'meal'} as eaten`}
                             onClick={() => onUpdateMeal(date, meal.id, { done: !meal.done })}
-                            className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border text-[10px] font-bold transition ${
-                              meal.done
-                                ? 'border-lime-glow/40 bg-lime-glow/20 text-lime-glow'
-                                : 'border-ink-600 bg-ink-800 text-mist-500 hover:border-brand-400/50'
-                            }`}
+                            className="-my-2.5 grid size-11 shrink-0 place-items-center rounded-lg transition"
                           >
-                            {meal.done ? '✓' : ''}
+                            <span
+                              className={`grid size-5 place-items-center rounded-md border text-[10px] font-bold transition ${
+                                meal.done
+                                  ? 'border-lime-glow/40 bg-lime-glow/20 text-lime-glow'
+                                  : 'border-ink-600 bg-ink-800 text-mist-500'
+                              }`}
+                            >
+                              {meal.done ? '✓' : ''}
+                            </span>
                           </button>
 
                           <button
@@ -406,7 +554,7 @@ export function NutritionView({
                             type="button"
                             onClick={() => onDeleteMeal(date, meal.id)}
                             aria-label={`Delete ${meal.name || 'meal'}`}
-                            className="shrink-0 rounded-md p-1 text-mist-500 transition hover:text-rose-glow"
+                            className="-my-2.5 grid size-11 shrink-0 place-items-center rounded-lg text-mist-500 transition hover:text-rose-glow"
                           >
                             <IconTrash className="h-3.5 w-3.5" />
                           </button>
@@ -456,6 +604,7 @@ export function NutritionView({
                 key={key}
                 label={label}
                 suffix={unit || undefined}
+                className="min-h-11"
                 value={effective[key]}
                 onChange={(event) => onUpdateTargets({ [key]: Number(event.target.value) || 0 })}
               />
@@ -489,6 +638,74 @@ export function NutritionView({
   )
 }
 
+/**
+ * One drink. Collapsed it shows the amount and time; tapping opens an exact
+ * amount field so a mis-logged drink is corrected rather than re-tapped in
+ * reverse.
+ */
+function WaterRow({
+  entry,
+  onUpdate,
+  onRemove,
+}: {
+  entry: WaterEntry
+  onUpdate: (patch: Partial<Omit<WaterEntry, 'id'>>) => void
+  onRemove: () => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  const time = entry.at
+    ? new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
+
+  return (
+    <li className="flex items-center gap-1">
+      {open ? (
+        <>
+          <span className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-ink-850/70 px-2">
+            <IconWater className="h-3.5 w-3.5 shrink-0 text-brand-300" />
+            <input
+              type="number"
+              value={entry.ml}
+              min={1}
+              aria-label="Corrected amount in millilitres"
+              onChange={(event) => onUpdate({ ml: Math.max(0, Number(event.target.value) || 0) })}
+              className="tnum h-11 min-w-0 flex-1 rounded-lg border border-ink-600 bg-ink-850 px-2 text-[11px] text-mist-100"
+            />
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="min-h-11 shrink-0 rounded-lg bg-brand-500 px-3 text-[11px] font-semibold text-white"
+          >
+            Done
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={`Correct this drink of ${entry.ml} millilitres`}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition hover:bg-ink-850/70"
+        >
+          <IconWater className="h-3.5 w-3.5 shrink-0 text-brand-300" />
+          <span className="tnum text-[11px] text-mist-200">{entry.ml} ml</span>
+          <span className="tnum text-[10px] text-mist-500">{time ?? 'earlier'}</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove this drink of ${entry.ml} millilitres`}
+        className="grid size-11 shrink-0 place-items-center rounded-lg text-mist-500 transition hover:text-rose-glow"
+      >
+        <IconTrash className="h-3.5 w-3.5" />
+      </button>
+    </li>
+  )
+}
+
 function MealSheet({
   profile,
   initial,
@@ -502,27 +719,42 @@ function MealSheet({
   onSave: (meal: Meal) => void
   onDelete?: () => void
 }) {
+  const blank: FoodItem = { id: '', name: '', qty: 100, unit: 'g', kcal: 0, protein: 0, carbs: 0, fat: 0 }
+
   const [name, setName] = useState(initial.name)
   const [slot, setSlot] = useState<MealSlot>(initial.slot)
   const [done, setDone] = useState(initial.done)
   const [items, setItems] = useState<FoodItem[]>(initial.items)
-  const [draft, setDraft] = useState<FoodItem>({
-    id: '',
-    name: '',
-    qty: 100,
-    unit: 'g',
-    kcal: 0,
-    protein: 0,
-    carbs: 0,
-    fat: 0,
-  })
+  const [draft, setDraft] = useState<FoodItem>(blank)
+  // Which saved row the draft is currently standing in for, if any.
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const macros = useMemo(() => sumMacros(items), [items])
+  const suggestions = useMemo(() => suggestionsFor(profile, slot), [profile, slot])
 
   const addItem = () => {
     if (!draft.name.trim()) return
-    setItems((current) => [...current, { ...draft, id: `f_${Date.now().toString(36)}` }])
-    setDraft({ id: '', name: '', qty: 100, unit: 'g', kcal: 0, protein: 0, carbs: 0, fat: 0 })
+    if (editingId) {
+      // Correcting a food in place. Deleting and re-adding it also worked, but
+      // it threw away a row the user had deliberately placed in the meal.
+      setItems((current) =>
+        current.map((item) =>
+          item.id === editingId ? { ...draft, id: item.id, name: draft.name.trim() } : item,
+        ),
+      )
+    } else {
+      setItems((current) => [...current, { ...draft, id: `f_${Date.now().toString(36)}` }])
+    }
+    setDraft(blank)
+    setEditingId(null)
+  }
+
+  const removeItem = (id: string) => {
+    setItems((current) => current.filter((item) => item.id !== id))
+    if (editingId === id) {
+      setDraft(blank)
+      setEditingId(null)
+    }
   }
 
   return (
@@ -535,7 +767,7 @@ function MealSheet({
             <button
               type="button"
               onClick={onDelete}
-              className="rounded-lg border border-rose-glow/30 px-4 py-2.5 text-sm text-rose-glow"
+              className="min-h-11 rounded-lg border border-rose-glow/30 px-4 text-sm text-rose-glow"
             >
               Delete
             </button>
@@ -543,7 +775,7 @@ function MealSheet({
           <button
             type="button"
             onClick={() => onSave({ ...initial, name: name.trim() || 'Meal', slot, done, items })}
-            className="flex-1 rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-400"
+            className="min-h-11 flex-1 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-400"
           >
             Save
           </button>
@@ -555,7 +787,7 @@ function MealSheet({
           label="Meal name"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder={suggestionsFor(profile, slot)[0]?.name}
+          placeholder={suggestions[0]?.name}
         />
 
         <div>
@@ -572,7 +804,7 @@ function MealSheet({
         <div>
           <p className="mb-1.5 text-[10px] font-medium tracking-wider text-mist-400 uppercase">Suggestions</p>
           <div className="flex flex-wrap gap-1.5">
-            {suggestionsFor(profile, slot).map((option) => (
+            {suggestions.map((option) => (
               <Chip
                 key={option.name}
                 onClick={() =>
@@ -607,10 +839,12 @@ function MealSheet({
               <TextField
                 type="number"
                 value={draft.qty}
+                aria-label="Quantity"
                 onChange={(event) => setDraft({ ...draft, qty: Number(event.target.value) || 0 })}
               />
               <TextField
                 value={draft.unit}
+                aria-label="Unit"
                 onChange={(event) => setDraft({ ...draft, unit: event.target.value })}
                 placeholder="g / ml / serving"
               />
@@ -627,20 +861,35 @@ function MealSheet({
                 <TextField
                   key={key}
                   type="number"
+                  aria-label={label}
                   value={draft[key] || ''}
                   onChange={(event) => setDraft({ ...draft, [key]: Number(event.target.value) || 0 })}
                   placeholder={label}
                 />
               ))}
             </div>
-            <button
-              type="button"
-              onClick={addItem}
-              disabled={!draft.name.trim()}
-              className="w-full rounded-lg border border-ink-600 py-2 text-xs font-medium text-mist-200 transition hover:border-brand-400/40 hover:text-brand-300 disabled:opacity-40"
-            >
-              Add food
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={addItem}
+                disabled={!draft.name.trim()}
+                className="min-h-11 flex-1 rounded-lg border border-ink-600 px-3 text-xs font-medium text-mist-200 transition hover:border-brand-400/40 hover:text-brand-300 disabled:opacity-40"
+              >
+                {editingId ? 'Update food' : 'Add food'}
+              </button>
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(blank)
+                    setEditingId(null)
+                  }}
+                  className="min-h-11 rounded-lg border border-ink-600 px-3 text-xs text-mist-300"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -654,20 +903,41 @@ function MealSheet({
             </div>
             <ul className="mt-2 space-y-1">
               {items.map((item) => (
-                <li key={item.id} className="flex items-center gap-2 text-[11px]">
-                  <span className="min-w-0 flex-1 truncate text-mist-300">{item.name}</span>
-                  <span className="tnum shrink-0 text-mist-500">
-                    {item.qty}
-                    {item.unit}
-                  </span>
-                  <span className="tnum w-16 shrink-0 text-right text-mist-200">{Math.round(item.kcal)} kcal</span>
+                <li key={item.id} className="flex items-center gap-1 text-[11px]">
+                  {/*
+                    Tapping a saved food loads it back into the form above so a
+                    wrong quantity or macro can be corrected in place. Without
+                    this the only way to fix one was to delete it and type it
+                    out again.
+                  */}
                   <button
                     type="button"
-                    onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))}
-                    aria-label={`Remove ${item.name}`}
-                    className="shrink-0 rounded p-0.5 text-mist-500 hover:text-rose-glow"
+                    onClick={() => {
+                      setDraft({ ...item })
+                      setEditingId(item.id)
+                    }}
+                    aria-pressed={editingId === item.id}
+                    aria-label={`Edit ${item.name}`}
+                    className={`flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition ${
+                      editingId === item.id ? 'bg-brand-500/12' : 'hover:bg-ink-850/70'
+                    }`}
                   >
-                    <IconTrash className="h-3 w-3" />
+                    <span className="min-w-0 flex-1 truncate text-mist-300">{item.name}</span>
+                    <span className="tnum shrink-0 text-mist-500">
+                      {item.qty}
+                      {item.unit}
+                    </span>
+                    <span className="tnum w-16 shrink-0 text-right text-mist-200">
+                      {Math.round(item.kcal)} kcal
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    aria-label={`Remove ${item.name}`}
+                    className="grid size-11 shrink-0 place-items-center rounded-lg text-mist-500 hover:text-rose-glow"
+                  >
+                    <IconTrash className="h-3.5 w-3.5" />
                   </button>
                 </li>
               ))}

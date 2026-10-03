@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { reconcile } from './reconcile'
+import {
+  addWaterEntry,
+  dropMeal,
+  ensureDay,
+  insertMeal,
+  normaliseDay,
+  patchMeal,
+  removeWaterEntry,
+  updateWaterEntry,
+  waterEntries,
+  withDay,
+} from './nutrition-day'
 import type {
   Difficulty,
   Exercise,
@@ -9,6 +21,7 @@ import type {
   Profile,
   RecordEntry,
   SkillProgress,
+  WaterEntry,
   WeightEntry,
   Workout,
   WorkoutItem,
@@ -478,67 +491,79 @@ export function useDismissedSuggestions() {
 /* ── Nutrition & weight ─────────────────────────────────────────────────── */
 
 export function useNutrition() {
-  const [days, setDays] = usePersistentState<NutritionDay[]>(NUTRITION_KEY, [])
+  const [stored, setDays] = usePersistentState<NutritionDay[]>(NUTRITION_KEY, [])
 
-  const updateDay = useCallback(
-    (date: string, patch: Partial<Omit<NutritionDay, 'date'>>) => {
-      setDays((current) => {
-        const index = current.findIndex((day) => day.date === date)
-        if (index === -1) {
-          return [{ date, meals: [], waterMl: 0, ...patch }, ...current]
-        }
-        const next = [...current]
-        next[index] = { ...next[index], ...patch }
-        return next
-      })
-    },
-    [setDays],
-  )
+  // Days written before the drink log still carry only `waterMl`. Reconciling
+  // them here means every consumer sees the same totals, and the first write
+  // settles them into the new shape without a separate migration step.
+  const days = useMemo(() => stored.map(normaliseDay), [stored])
 
   const addMeal = useCallback(
-    (date: string, meal: Meal) => {
-      // The editor seeds a blank meal with an empty id; give it a real one here
-      // so later edits and deletes address exactly one meal. An id supplied by
-      // an imported backup is kept as-is.
-      const stored: Meal = meal.id ? meal : { ...meal, id: createId('meal') }
-      setDays((current) => {
-        const index = current.findIndex((day) => day.date === date)
-        if (index === -1) return [{ date, meals: [stored], waterMl: 0 }, ...current]
-        const next = [...current]
-        next[index] = { ...next[index], meals: [...next[index].meals, stored] }
-        return next
-      })
-    },
+    (date: string, meal: Meal) => setDays((current) => insertMeal(current, date, meal)),
     [setDays],
   )
 
   const updateMeal = useCallback(
-    (date: string, mealId: string, patch: Partial<Meal>) => {
-      setDays((current) =>
-        current.map((day) =>
-          day.date === date
-            ? { ...day, meals: day.meals.map((meal) => (meal.id === mealId ? { ...meal, ...patch } : meal)) }
-            : day,
-        ),
-      )
-    },
+    (date: string, mealId: string, patch: Partial<Meal>) =>
+      setDays((current) => patchMeal(current, date, mealId, patch)),
     [setDays],
   )
 
   const deleteMeal = useCallback(
-    (date: string, mealId: string) => {
-      setDays((current) =>
-        current.map((day) =>
-          day.date === date
-            ? { ...day, meals: day.meals.filter((meal) => meal.id !== mealId) }
-            : day,
-        ),
-      )
-    },
+    (date: string, mealId: string) => setDays((current) => dropMeal(current, date, mealId)),
     [setDays],
   )
 
-  return { days, updateDay, addMeal, updateMeal, deleteMeal }
+  // Water goes through the drink log rather than a bare total, so a drink can be
+  // corrected or removed on its own instead of by tapping backwards in steps.
+  // Each of these reads the stored day inside the updater: tapping "+250 ml"
+  // four times in one burst has to record four drinks, not one.
+  //
+  // `waterMl` is deliberately not settable from outside. It is derived from the
+  // drinks, and a caller writing it directly would be silently overwritten by
+  // the next normalisation — which is the whole class of bug the log replaces.
+  const addWater = useCallback(
+    (date: string, ml: number) =>
+      setDays((current) =>
+        ensureDay(current, date, (day) => ({
+          ...day,
+          water: addWaterEntry(waterEntries(day), ml, Date.now()),
+        })),
+      ),
+    [setDays],
+  )
+
+  const updateWater = useCallback(
+    (date: string, entryId: string, patch: Partial<Omit<WaterEntry, 'id'>>) =>
+      setDays((current) =>
+        withDay(current, date, (day) => ({
+          ...day,
+          water: updateWaterEntry(waterEntries(day), entryId, patch),
+        })),
+      ),
+    [setDays],
+  )
+
+  const removeWater = useCallback(
+    (date: string, entryId: string) =>
+      setDays((current) =>
+        withDay(current, date, (day) => ({
+          ...day,
+          water: removeWaterEntry(waterEntries(day), entryId),
+        })),
+      ),
+    [setDays],
+  )
+
+  return {
+    days,
+    addMeal,
+    updateMeal,
+    deleteMeal,
+    addWater,
+    updateWater,
+    removeWater,
+  }
 }
 
 export function useNutritionTargets() {

@@ -241,10 +241,26 @@ export interface Meal {
   done: boolean
 }
 
+/** One drink. A day keeps a list so a wrong entry can be corrected, not just re-tapped. */
+export interface WaterEntry {
+  id: string
+  ml: number
+  /** Epoch ms, purely for ordering and the time shown beside the amount. */
+  at: number
+}
+
 export interface NutritionDay {
   date: string
   meals: Meal[]
+  /** Total water in ml. Authoritative for anything reading it without the log. */
   waterMl: number
+  /**
+   * The individual drinks behind `waterMl`. Added after `waterMl` was already
+   * being stored, so it is optional: days written by the previous build have
+   * only the total, and `waterEntries()` gives them one implied entry rather
+   * than losing the amount.
+   */
+  water?: WaterEntry[]
   note?: string
 }
 
