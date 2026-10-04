@@ -19,8 +19,10 @@ import { SkillsView } from './components/SkillsView'
 import { WorkoutsView } from './components/WorkoutsView'
 import { WorkoutTab } from './components/WorkoutTab'
 import { todayKey } from './lib/dates'
-import { computeStreak, deriveSessionStatus, recordCandidates } from './lib/stats'
+import { computeStreak, deriveSessionStatus } from './lib/stats'
+import { recordCandidates } from './lib/record-candidates'
 import { addSessionItem, emptySession, startSession } from './lib/session'
+import { useTodayKey } from './lib/use-today'
 import {
   bestFor,
   resetAllData,
@@ -84,7 +86,13 @@ export default function App() {
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
   const liveSession = activeSession?.status === 'in-progress' ? activeSession : null
-  const streak = useMemo(() => computeStreak(sessions, profile, workouts), [sessions, profile, workouts])
+  // The streak is a function of today, and this one is shared by Home and
+  // History, so it has to survive midnight for as long as the app is open.
+  const today = useTodayKey()
+  const streak = useMemo(
+    () => computeStreak(sessions, profile, workouts, today),
+    [sessions, profile, workouts, today],
+  )
 
   /**
    * Keeps the tab on the workout while one is running.
@@ -209,6 +217,25 @@ export default function App() {
     [deleteSession, notify, setActiveSessionId],
   )
 
+  /*
+   * The sheets and detail views below are mounted at the shell level so they can
+   * outlive the view that opened them, and the links that hand you to another tab
+   * (`openSkill`, `openBuilderWithSeeds`, `goToProgress`) set `tab` directly, so
+   * what they open survives the trip. Only the nav is a bare tab change, and
+   * nothing should follow it: leaving the app blocked behind a sheet that belongs
+   * to another tab cannot be undone by tapping, because the sheet's backdrop
+   * covers the very nav that would have dismissed it.
+   */
+  const switchTab = useCallback((next: Tab) => {
+    setDetail(null)
+    setPicker(null)
+    setReviewSessionId(null)
+    setOpenSkillId(null)
+    setOpenWorkoutId(null)
+    setAddRecordOpen(false)
+    setTab(next)
+  }, [])
+
   const goToProgress = useCallback((target: ProgressTab) => {
     setProgressTab(target)
     setTab('progress')
@@ -277,7 +304,7 @@ export default function App() {
     <div className="min-h-dvh overflow-x-clip pb-24 md:pb-10">
       <BottomNav
         active={tab}
-        onChange={setTab}
+        onChange={switchTab}
         badges={{ workout: liveSession ? true : undefined }}
       />
 
@@ -472,7 +499,6 @@ export default function App() {
             {progressTab === 'records' && (
               <RecordsView
                 records={records}
-                sessions={sessions}
                 onDelete={deleteRecord}
                 onOpenExercise={setDetail}
                 onRequestAdd={() => setAddRecordOpen(true)}

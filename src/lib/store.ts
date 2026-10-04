@@ -1,5 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { LIBRARY } from '../data'
 import { reconcile } from './reconcile'
+import {
+  reviveActiveSessionId,
+  reviveDismissed,
+  reviveIds,
+  reviveLevels,
+  reviveNutritionDays,
+  reviveNutritionTargets,
+  reviveProfile,
+  reviveRecords,
+  reviveSessions,
+  reviveSkillProgress,
+  reviveTheme,
+  reviveWeightEntries,
+  reviveWorkouts,
+} from './repair'
 import {
   addWaterEntry,
   dropMeal,
@@ -60,6 +76,58 @@ export const STORAGE_KEYS = [
   ACTIVE_SESSION_KEY,
 ] as const
 
+/** What a key holds before anyone has written to it. */
+export const DEFAULT_PROFILE: Profile = {
+  onboarded: false,
+  onboardedAt: 0,
+  sex: 'undisclosed',
+  goals: [],
+  level: 'beginner',
+  pullUpAbility: 'none',
+  equipment: ['none'],
+  daysPerWeek: 3,
+  preferredDays: [],
+  sessionMinutes: 45,
+  mealsPerDay: 3,
+  likedFoods: '',
+  dislikedFoods: '',
+  allergies: '',
+  diet: 'omnivore',
+  unit: 'kg',
+  theme: 'dark',
+}
+
+const DEFAULT_TARGETS: NutritionTargets = {
+  kcal: 2200,
+  protein: 140,
+  carbs: 220,
+  fat: 70,
+  waterMl: 2500,
+  auto: true,
+}
+
+/**
+ * The empty value for every key, keyed so a new key cannot be added to
+ * `STORAGE_KEYS` without its default being given here too — the mapped type is
+ * the check, and it is why `restoreBackup` can repair an import without having
+ * to know what any particular key is supposed to look like.
+ */
+const STORAGE_DEFAULTS: Record<(typeof STORAGE_KEYS)[number], unknown> = {
+  [MY_EXERCISES_KEY]: [],
+  [WORKOUTS_KEY]: [],
+  [SESSIONS_KEY]: [],
+  [RECORDS_KEY]: [],
+  [NUTRITION_KEY]: [],
+  [NUTRITION_TARGETS_KEY]: DEFAULT_TARGETS,
+  [WEIGHT_KEY]: [],
+  [SKILLS_KEY]: [],
+  [LEVELS_KEY]: {},
+  [DISMISSED_KEY]: {},
+  [PROFILE_KEY]: DEFAULT_PROFILE,
+  [THEME_KEY]: 'dark',
+  [ACTIVE_SESSION_KEY]: null,
+}
+
 export function readStored<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback
   try {
@@ -76,11 +144,65 @@ export function readStored<T>(key: string, fallback: T): T {
 export { reconcile } from './reconcile'
 
 /**
+ * Which exercises this build has, for the two keys whose entries name one.
+ *
+ * Handed to the revivers rather than imported by them: `repair.ts` has to stay
+ * importable from a bare Node process, and this is the one place in the app
+ * that runs it. Without it a workout or session carried over from a build that
+ * renamed an exercise keeps a line nothing can render, and still counts its
+ * sets towards a total the user could never reach.
+ */
+const KNOWN_EXERCISES: ReadonlySet<string> = new Set(LIBRARY.map((exercise) => exercise.id))
+
+/**
+ * Which stored key gets which shape fix, and what it looks like when empty.
+ *
+ * One mapping, read from two places: the hook below, and `restoreBackup` in
+ * `./backup`, so a backup is fitted on the way *in* rather than being written
+ * raw and left for the next launch to repair. Nothing else gets to add a key
+ * here without the same treatment, which is the point.
+ */
+const FITTERS: Record<string, (value: never) => unknown> = {
+  [MY_EXERCISES_KEY]: reviveIds,
+  [WORKOUTS_KEY]: (value: Workout[]) => reviveWorkouts(value, KNOWN_EXERCISES),
+  [SESSIONS_KEY]: (value: WorkoutSession[]) => reviveSessions(value, KNOWN_EXERCISES),
+  [RECORDS_KEY]: reviveRecords,
+  [NUTRITION_KEY]: reviveNutritionDays,
+  [NUTRITION_TARGETS_KEY]: (value: NutritionTargets) => reviveNutritionTargets(value, DEFAULT_TARGETS),
+  [WEIGHT_KEY]: reviveWeightEntries,
+  [SKILLS_KEY]: reviveSkillProgress,
+  [LEVELS_KEY]: reviveLevels,
+  [DISMISSED_KEY]: reviveDismissed,
+  [PROFILE_KEY]: (value: Profile) => reviveProfile(value, DEFAULT_PROFILE),
+  [THEME_KEY]: (value: string) => reviveTheme(value, 'dark'),
+  [ACTIVE_SESSION_KEY]: reviveActiveSessionId,
+}
+
+/**
+ * The key's own reviver first, then `reconcile` for a key the app does not own.
+ *
+ * The order matters and it is not obvious. `reconcile` holds a stored value to
+ * the *container* it expects, which means it throws away a lone string held
+ * against an array fallback — and it does so before the reviver that knows how
+ * to read one ever sees it. Every reviver here is a total function on `unknown`
+ * and rebuilds its value field by field, so running it first is both safe and
+ * strictly more informative: `"pull-ups"` in place of `["pull-ups"]` is what a
+ * hand-edited file looks like, and the reviver reads the one id the user wrote
+ * instead of losing the lot.
+ */
+export function fitStored<T>(key: string, raw: unknown, fallback?: T): T {
+  const fit = FITTERS[key] as ((value: unknown) => T) | undefined
+  if (fit) return fit(raw)
+  const empty = (fallback ?? STORAGE_DEFAULTS[key as (typeof STORAGE_KEYS)[number]]) as T
+  return reconcile<T>(raw, empty)
+}
+
+/**
  * State that mirrors itself into localStorage and stays in sync with other
  * open tabs of the same app.
  */
 function usePersistentState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => reconcile(readStored<unknown>(key, initial), initial))
+  const [value, setValue] = useState<T>(() => fitStored(key, readStored<unknown>(key, initial), initial))
 
   useEffect(() => {
     try {
@@ -94,7 +216,7 @@ function usePersistentState<T>(key: string, initial: T) {
     function onStorage(event: StorageEvent) {
       if (event.key !== key || event.newValue == null) return
       try {
-        setValue(reconcile<T>(JSON.parse(event.newValue), initial))
+        setValue(fitStored(key, JSON.parse(event.newValue), initial))
       } catch {
         /* ignore malformed payloads from other tabs */
       }
@@ -567,26 +689,28 @@ export function useNutrition() {
 }
 
 export function useNutritionTargets() {
-  const [targets, setTargets] = usePersistentState<NutritionTargets>(NUTRITION_TARGETS_KEY, {
-    kcal: 2200,
-    protein: 140,
-    carbs: 220,
-    fat: 70,
-    waterMl: 2500,
-    auto: true,
-  })
+  const [targets, setTargets] = usePersistentState<NutritionTargets>(NUTRITION_TARGETS_KEY, DEFAULT_TARGETS)
   return { targets, setTargets }
 }
 
 export function useWeightLog() {
-  const [entries, setEntries] = usePersistentState<WeightEntry[]>(WEIGHT_KEY, [])
+  const [stored, setEntries] = usePersistentState<WeightEntry[]>(WEIGHT_KEY, [])
+
+  /*
+   * Ordered on read rather than only on write. `logWeight` sorts, but a restored
+   * backup or a second device can hand over an unsorted log, and the Progress
+   * screen reads the first and last entries as "first" and "latest" — so an
+   * unsorted log drew the weight chart back to front and reported the newest
+   * weigh-in as the oldest. Same order the nutrition day list is read in.
+   */
+  const entries = useMemo(
+    () => [...stored].sort((a, b) => a.date.localeCompare(b.date)),
+    [stored],
+  )
 
   const logWeight = useCallback(
     (date: string, kg: number) => {
-      setEntries((current) => [
-        ...current.filter((entry) => entry.date !== date),
-        { date, kg },
-      ].sort((a, b) => a.date.localeCompare(b.date)))
+      setEntries((current) => [...current.filter((entry) => entry.date !== date), { date, kg }])
     },
     [setEntries],
   )
@@ -600,26 +724,6 @@ export function useWeightLog() {
 }
 
 /* ── Profile & theme ────────────────────────────────────────────────────── */
-
-export const DEFAULT_PROFILE: Profile = {
-  onboarded: false,
-  onboardedAt: 0,
-  sex: 'undisclosed',
-  goals: [],
-  level: 'beginner',
-  pullUpAbility: 'none',
-  equipment: ['none'],
-  daysPerWeek: 3,
-  preferredDays: [],
-  sessionMinutes: 45,
-  mealsPerDay: 3,
-  likedFoods: '',
-  dislikedFoods: '',
-  allergies: '',
-  diet: 'omnivore',
-  unit: 'kg',
-  theme: 'dark',
-}
 
 export function useProfile() {
   const [profile, setProfile] = usePersistentState<Profile>(PROFILE_KEY, DEFAULT_PROFILE)

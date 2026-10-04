@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { DIFFICULTIES, MUSCLES, MUSCLE_ACCENT } from '../data'
+import { difficultyMeta, muscleAccent, muscleMeta } from '../lib/labels'
 import type { Difficulty, Muscle } from '../types'
 
 /* ── Icons ─────────────────────────────────────────────────────────────── */
@@ -29,6 +29,21 @@ export function IconPlus({ className = base }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className} aria-hidden="true">
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+/**
+ * Play/pause mark for the small animation badges. Drawn rather than typed: the
+ * characters `❚❚` and `▶` have no glyph in the app's font stack and fall back to
+ * a double-width face, so a pair of them measured 28px of advance inside a 14px
+ * `size-4` circle and spilled 7px out of each side of the badge.
+ */
+export function PlayPauseGlyph({ playing, className = 'h-2 w-2' }: { playing: boolean; className?: string }) {
+  const stroke = { strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
+  return (
+    <svg viewBox="0 0 24 24" fill={playing ? 'currentColor' : 'none'} stroke="currentColor" {...stroke} className={className} aria-hidden="true">
+      {playing ? <path d="M9 5v14M15 5v14" /> : <path d="M7.5 4.8 19 12 7.5 19.2V4.8Z" />}
     </svg>
   )
 }
@@ -125,7 +140,7 @@ export function DifficultyBadge({
   level: Difficulty
   size?: 'sm' | 'md'
 }) {
-  const meta = DIFFICULTIES[level]
+  const meta = difficultyMeta(level)
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full font-medium ring-1 ${meta.chip} ${
@@ -151,9 +166,9 @@ export function Tag({ children, className = '' }: { children: ReactNode; classNa
 export function MusclePill({ muscle, className = '' }: { muscle: Muscle; className?: string }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${MUSCLE_ACCENT[muscle].chip} ${className}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${muscleAccent(muscle).chip} ${className}`}
     >
-      {MUSCLES[muscle].label}
+      {muscleMeta(muscle).label}
     </span>
   )
 }

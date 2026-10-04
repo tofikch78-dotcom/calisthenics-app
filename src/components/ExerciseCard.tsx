@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { MUSCLE_ACCENT, MUSCLES } from '../data'
 import { formatDosage } from '../lib/search'
 import type { Exercise } from '../types'
 import { ExerciseAnimation } from './ExerciseAnimation'
-import { equipmentLabel } from '../lib/labels'
-import { DifficultyBadge, IconCheck, IconPlus } from './ui'
+import { equipmentLabel, muscleAccent, muscleLabel, muscleMeta } from '../lib/labels'
+import { DifficultyBadge, IconCheck, IconPlus, PlayPauseGlyph } from './ui'
 
-/** "Quadriceps, Glutes" — the secondary muscles, comma separated. */
+/** "Quadriceps, Glutes" - the secondary muscles, comma separated. */
 function joinMuscles(muscles: Exercise['secondaryMuscles']): string {
-  return muscles.map((muscle) => MUSCLES[muscle].label).join(', ')
+  return muscles.map(muscleLabel).join(', ')
 }
 
 export interface ExerciseCardProps {
@@ -19,8 +18,8 @@ export interface ExerciseCardProps {
 }
 
 export function ExerciseCard({ exercise, saved, onToggleSave, onOpen }: ExerciseCardProps) {
-  const primary = MUSCLES[exercise.mainMuscle]
-  const accent = MUSCLE_ACCENT[exercise.mainMuscle]
+  const primary = muscleMeta(exercise.mainMuscle)
+  const accent = muscleAccent(exercise.mainMuscle)
   const secondary = exercise.secondaryMuscles.filter((muscle) => muscle !== exercise.mainMuscle)
   // Playback lives here so the pause control can be a sibling of the "open
   // details" button instead of a button nested inside a button.
@@ -55,8 +54,8 @@ export function ExerciseCard({ exercise, saved, onToggleSave, onOpen }: Exercise
                */
               className="absolute -right-2.5 -bottom-2.5 z-10 grid size-11 place-items-center rounded-full text-mist-300 transition hover:text-brand-300"
             >
-              <span className="grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-[7px] leading-none backdrop-blur transition group-hover:border-brand-400/60">
-                {playing ? '❚❚' : '▶'}
+              <span className="grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-mist-300 backdrop-blur transition group-hover:border-brand-400/60">
+                <PlayPauseGlyph playing={playing} />
               </span>
             </button>
           )}

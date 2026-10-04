@@ -6,7 +6,7 @@ import {
   formatDuration,
   relativeDay,
   startOfWeek,
-  todayKey,
+  weekdayOf,
   addDays,
 } from '../lib/dates'
 import {
@@ -16,6 +16,7 @@ import {
   type StreakInfo,
   type WeekSummary,
 } from '../lib/stats'
+import { useTodayKey } from '../lib/use-today'
 import type { Profile, Workout, WorkoutSession } from '../types'
 import { Card, IconFlame, IconNote, Pill, ProgressBar, ProgressRing, StatTile } from './kit'
 
@@ -31,8 +32,10 @@ type Range = 'week' | 'month' | 'all'
 
 export function HistoryView({ sessions, workouts, profile, streak, onOpenSession }: HistoryViewProps) {
   const [range, setRange] = useState<Range>('week')
-  const [today] = useState(todayKey)
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(todayKey()))
+  // Read live rather than frozen at mount: an app left open overnight used to
+  // keep filtering the last 30 days against yesterday.
+  const today = useTodayKey()
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(today))
 
   const week = useMemo(
     () => weekSummary(sessions, profile, workouts, weekStart),
@@ -44,11 +47,20 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
    * "Month" used to filter on `weekStart` as well, so it listed exactly what
    * "Week" listed — the two buttons were indistinguishable and the whole month
    * of history was unreachable. It means the last 30 days.
+   *
+   * "Week" is one week, not "this week onwards": it was bounded below by
+   * `weekStart` and above by `today`, so stepping back with ← Prev left the
+   * current week in the list and simply made it longer, while the summary card
+   * above moved on to the week before.
    */
   const filtered = useMemo(() => {
     if (range === 'all') return entries
-    const from = range === 'week' ? weekStart : addDays(today, -29)
-    return entries.filter((entry) => entry.session.date >= from && entry.session.date <= today)
+    if (range === 'month') {
+      const from = addDays(today, -29)
+      return entries.filter((entry) => entry.session.date >= from && entry.session.date <= today)
+    }
+    const to = addDays(weekStart, 6)
+    return entries.filter((entry) => entry.session.date >= weekStart && entry.session.date <= to)
   }, [entries, range, weekStart, today])
 
   return (
@@ -62,13 +74,20 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
           >
             <div>
               <div className="tnum text-base leading-none font-bold text-mist-100">{week.completion}%</div>
-              <div className="mt-0.5 text-[9px] text-mist-400">week done</div>
+              {/* Not "week done": that is a share of sets, not of days — read
+                  next to "3/4 completed / planned" it claimed a day score it
+                  never was. */}
+              <div className="mt-0.5 text-[9px] text-mist-400">sets done</div>
             </div>
           </ProgressRing>
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-mist-100">This week</h3>
+              {/* Not always "this" week: ← Prev moves the card back, and a
+                  heading that kept saying otherwise made the card look stuck. */}
+              <h3 className="text-sm font-semibold text-mist-100">
+                {weekStart === startOfWeek(today) ? 'This week' : 'Selected week'}
+              </h3>
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-glow/15 px-2 py-0.5 text-[11px] font-bold text-amber-glow ring-1 ring-amber-glow/30">
                 <IconFlame className="h-3 w-3" />
                 {streak.days}
@@ -80,7 +99,7 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
             <div className="mt-2 flex gap-1">
               {week.byDay.map((day) => (
                 <div key={day.date} className="flex flex-1 flex-col items-center gap-1">
-                  <span className="text-[9px] text-mist-500">{DAY_SHORT[new Date(`${day.date}T00:00:00`).getDay()]}</span>
+                  <span className="text-[9px] text-mist-500">{DAY_SHORT[weekdayOf(day.date)]}</span>
                   <span
                     title={DAY_STATUS_META[day.status].label}
                     className={`h-6 w-full rounded-md ${day.status === 'completed' ? 'bg-lime-glow/70' : day.status === 'partial' ? 'bg-amber-glow/70' : day.status === 'skipped' ? 'bg-rose-glow/60' : day.status === 'planned' ? 'bg-brand-400/40' : 'bg-ink-700'}`}
@@ -137,7 +156,9 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
                       ? 'The last 30 days'
                       : 'Every session ever logged'
                 }
-                className={`min-h-11 rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
+                // `min-w-11` because "All" was 33px wide: the shortest of the three
+                // range buttons was the hardest to hit on the screen they share.
+                className={`min-h-11 min-w-11 rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
                   range === id ? 'bg-brand-500/18 text-brand-300' : 'bg-ink-800/70 text-mist-400 hover:text-mist-100'
                 }`}
               >
@@ -158,7 +179,7 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
             </button>
             <button
               type="button"
-              onClick={() => setWeekStart(startOfWeek(todayKey()))}
+              onClick={() => setWeekStart(startOfWeek(today))}
               className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500"
             >
               This week
@@ -166,7 +187,7 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
             <button
               type="button"
               onClick={() => setWeekStart(addDays(weekStart, 7))}
-              disabled={weekStart >= startOfWeek(todayKey())}
+              disabled={weekStart >= startOfWeek(today)}
               className="min-h-11 rounded-lg border border-ink-600 px-2.5 py-1 text-[11px] text-mist-300 hover:border-ink-500 disabled:opacity-40"
             >
               Next →
@@ -273,20 +294,30 @@ export function HistoryView({ sessions, workouts, profile, streak, onOpenSession
         <p className="mt-0.5 text-xs text-mist-400">
           Rest days never break a streak. Missing a day you planned to train does.
         </p>
-        <ConsistencyGrid sessions={sessions} profile={profile} />
+        <ConsistencyGrid sessions={sessions} workouts={workouts} profile={profile} today={today} />
       </Card>
     </div>
   )
 }
 
 /** Twelve trailing weeks of completion, oldest on the left. */
-function ConsistencyGrid({ sessions, profile }: { sessions: WorkoutSession[]; profile: Profile | null }) {
+function ConsistencyGrid({
+  sessions,
+  workouts,
+  profile,
+  today,
+}: {
+  sessions: WorkoutSession[]
+  workouts: Workout[]
+  profile: Profile | null
+  today: string
+}) {
   const weeks = useMemo(() => {
-    const thisWeek = startOfWeek(todayKey())
+    const thisWeek = startOfWeek(today)
     return Array.from({ length: 12 }, (_, index) =>
-      weekSummary(sessions, profile, [], addDays(thisWeek, (index - 11) * 7)),
+      weekSummary(sessions, profile, workouts, addDays(thisWeek, (index - 11) * 7)),
     )
-  }, [sessions, profile])
+  }, [sessions, profile, workouts, today])
 
   return (
     <div className="mt-3 flex gap-1 overflow-x-auto pb-1 scrollbar-slim">

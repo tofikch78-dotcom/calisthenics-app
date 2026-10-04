@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { LIBRARY, getExercise } from '../data'
-import { formatDateKey } from '../lib/dates'
-import type { Difficulty, Exercise, RecordEntry, RecordMetric, WorkoutSession } from '../types'
+import { formatDateKey, startOfWeek, toDateKey } from '../lib/dates'
+import { useTodayKey } from '../lib/use-today'
+import type { Difficulty, Exercise, RecordEntry, RecordMetric } from '../types'
 import { Card, Chip, IconTrophy, IconTrash, NumberField, Pill, Segmented, Sheet, StatTile, TextField } from './kit'
 import { DifficultyBadge, MusclePill } from './ui'
 
 export interface RecordsViewProps {
   records: RecordEntry[]
-  sessions: WorkoutSession[]
   onDelete: (id: string) => void
   onOpenExercise: (exercise: Exercise) => void
   /** Opens the add-record sheet. */
@@ -22,6 +22,9 @@ const METRIC_META: Record<RecordMetric, { label: string; short: string; unit: st
 
 const UNKNOWN_METRIC = { label: 'Result', short: 'Result', unit: '' }
 
+/** Rows in the "every best you broke" list before it says how many more there are. */
+const RECENT_ROWS = 12
+
 /**
  * Records live in localStorage and can arrive from an older version or a
  * hand-edited backup, so an unrecognised metric must degrade rather than
@@ -33,13 +36,27 @@ function metricMeta(metric: string) {
 
 type Filter = 'all' | RecordMetric
 
+/**
+ * The local day a record was set on.
+ *
+ * `achievedAt` is an instant, and every other date in the app is a local
+ * `yyyy-mm-dd` key. Reading it through `toISOString()` gave the *UTC* day
+ * instead, so a record set at 00:30 in any timezone east of Greenwich was filed
+ * under the previous day.
+ */
+function recordDay(entry: RecordEntry): string {
+  return formatDateKey(toDateKey(new Date(entry.achievedAt)))
+}
+
+/** Most recent first. */
+const newestFirst = (records: RecordEntry[]) =>
+  [...records].sort((a, b) => b.achievedAt - a.achievedAt)
+
 export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }: RecordsViewProps) {
   const [filter, setFilter] = useState<Filter>('all')
+  const today = useTodayKey()
 
-  // Read the clock once per mount so the "this week" tile does not drift.
-  const [now] = useState(() => Date.now())
-
-  const { current, previous, recent } = useMemo(() => {
+  const { current, previous, recent, exercises, setThisWeek } = useMemo(() => {
     const best = new Map<string, RecordEntry>()
     const runnerUp = new Map<string, RecordEntry[]>()
 
@@ -52,30 +69,35 @@ export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }:
       }
     }
 
+    // "This week" is the same Monday-based week as everywhere else, rather than
+    // a rolling 168 hours measured from whenever the tab happened to be opened.
+    const from = startOfWeek(today)
+
     return {
       current: [...best.values()].sort((a, b) => b.achievedAt - a.achievedAt),
       previous: runnerUp,
-      recent: [...records].sort((a, b) => b.achievedAt - a.achievedAt).slice(0, 12),
+      recent: newestFirst(records).slice(0, RECENT_ROWS),
+      exercises: new Set(records.map((entry) => entry.exerciseId)).size,
+      setThisWeek: records.filter((entry) => toDateKey(new Date(entry.achievedAt)) >= from).length,
     }
-  }, [records])
+  }, [records, today])
 
   const visible = filter === 'all' ? current : current.filter((entry) => entry.metric === filter)
-  const totalImprovements = records.length
+  const olderCount = records.length - recent.length
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatTile value={current.length} label="Exercises with a record" tone="brand" />
-        <StatTile value={totalImprovements} label="Records set all-time" />
+        {/* `current` is one row per exercise *and* metric, so this is the number
+            of live bests rather than the number of exercises — and the tile
+            below counts the exercises themselves. */}
+        <StatTile value={current.length} label="Live bests" tone="brand" />
+        <StatTile value={records.length} label="Records set all-time" />
+        <StatTile value={setThisWeek} label="Set this week" tone="ok" />
         <StatTile
-          value={records.filter((entry) => now - entry.achievedAt < 7 * 86_400_000).length}
-          label="Set this week"
-          tone="ok"
-        />
-        <StatTile
-          value={current.length}
-          label="Exercises tracked"
-          hint={current.length ? 'Each has one live best' : undefined}
+          value={exercises}
+          label="Exercises with a record"
+          hint={exercises ? 'Each has one live best' : undefined}
         />
       </div>
 
@@ -138,8 +160,8 @@ export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }:
                       <MusclePill muscle={exercise.mainMuscle} />
                       <DifficultyBadge level={exercise.difficulty as Difficulty} />
                     </div>
-                    <p className="mt-0.5 text-[11px] text-mist-400">
-                      {metricMeta(entry.metric).label} · {formatDateKey(new Date(entry.achievedAt).toISOString().slice(0, 10))}
+                    <p className="mt-0.5 text-xs text-mist-400">
+                      {metricMeta(entry.metric).label} · {recordDay(entry)}
                       {before ? ` · previous best ${before.value} ${metricMeta(entry.metric).unit}` : ' · first record'}
                     </p>
                   </button>
@@ -180,31 +202,39 @@ export function RecordsView({ records, onDelete, onOpenExercise, onRequestAdd }:
         {recent.length === 0 ? (
           <p className="py-6 text-center text-xs text-mist-400">Nothing yet.</p>
         ) : (
-          <ul className="mt-3 space-y-1.5">
-            {recent.map((entry) => {
-              const exercise = getExercise(entry.exerciseId)
-              if (!exercise) return null
-              const isCurrent = current.some(
-                (best) => best.exerciseId === entry.exerciseId && best.metric === entry.metric && best.id === entry.id,
-              )
-              return (
-                <li
-                  key={entry.id}
-                  className="flex items-center gap-2 border-b border-ink-700/50 py-1.5 text-[11px] last:border-0"
-                >
-                  <span className="tnum w-16 shrink-0 text-mist-500">
-                    {formatDateKey(new Date(entry.achievedAt).toISOString().slice(0, 10))}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-mist-300">{exercise.name}</span>
-                  <span className="tnum shrink-0 text-mist-400">{metricMeta(entry.metric).short}</span>
-                  <span className="tnum w-14 shrink-0 text-right font-semibold text-mist-100">
-                    {entry.value} {metricMeta(entry.metric).unit}
-                  </span>
-                  <span className="w-4 shrink-0 text-center">{isCurrent ? '🎉' : ''}</span>
-                </li>
-              )
-            })}
-          </ul>
+          <>
+            <ul className="mt-3 space-y-1.5">
+              {recent.map((entry) => {
+                const exercise = getExercise(entry.exerciseId)
+                if (!exercise) return null
+                const isCurrent = current.some(
+                  (best) => best.exerciseId === entry.exerciseId && best.metric === entry.metric && best.id === entry.id,
+                )
+                return (
+                  <li
+                    key={entry.id}
+                    className="flex items-center gap-2 border-b border-ink-700/50 py-1.5 text-[11px] last:border-0"
+                  >
+                    <span className="tnum w-16 shrink-0 text-mist-500">{recordDay(entry)}</span>
+                    <span className="min-w-0 flex-1 truncate text-mist-300">{exercise.name}</span>
+                    <span className="tnum shrink-0 text-mist-400">{metricMeta(entry.metric).short}</span>
+                    <span className="tnum w-14 shrink-0 text-right font-semibold text-mist-100">
+                      {entry.value} {metricMeta(entry.metric).unit}
+                    </span>
+                    <span className="w-4 shrink-0 text-center">{isCurrent ? '🎉' : ''}</span>
+                  </li>
+                )
+              })}
+            </ul>
+
+            {/* The heading promises *every* best ever broken, so say what is left
+                out rather than quietly stopping at the twelfth. */}
+            {olderCount > 0 && (
+              <p className="mt-2 text-center text-[10px] text-mist-500">
+                {olderCount} older record{olderCount === 1 ? '' : 's'} not shown.
+              </p>
+            )}
+          </>
         )}
       </Card>
     </div>
@@ -245,9 +275,23 @@ export function AddRecordSheet({ best, onAdd, onClose }: AddRecordSheetProps) {
     ).slice(0, 6)
   }, [query])
 
+  /*
+   * Three ways to be chosen, in order of specificity: one of the common
+   * records, a result row the user tapped, or — if they have typed something and
+   * not tapped a row — the first match.
+   *
+   * The third case used to win over the second. A result row is stored as a bare
+   * exercise id, which is never one of the common-record keys, so tapping the
+   * *second* result silently fell back to `matches[0]` and saved the first one
+   * instead — while showing that exercise's name and best in the panel above.
+   */
   const resolved = useMemo(() => {
     const preset = SUGGESTED.find((option) => `${option.exerciseId}:${option.metric}` === presetId)
     if (preset) return preset
+
+    const picked = matches.find((exercise) => exercise.id === presetId)
+    if (picked) return { exerciseId: picked.id, metric, label: picked.name }
+
     const first = matches[0]
     if (!query.trim() || !first) return null
     return { exerciseId: first.id, metric, label: first.name }
@@ -324,7 +368,9 @@ export function AddRecordSheet({ best, onAdd, onClose }: AddRecordSheetProps) {
                   key={exercise.id}
                   pressed={resolved?.exerciseId === exercise.id}
                   onClick={() => {
-                    setPresetId(`${exercise.id}:${metric}`)
+                    // A bare id, so switching the metric below keeps the
+                    // exercise the user actually picked.
+                    setPresetId(exercise.id)
                     setValue('')
                   }}
                 >
@@ -340,10 +386,7 @@ export function AddRecordSheet({ best, onAdd, onClose }: AddRecordSheetProps) {
             <Segmented
               ariaLabel="Record metric"
               value={metric}
-              onChange={(next) => {
-                setMetric(next)
-                setPresetId('')
-              }}
+              onChange={setMetric}
               options={[
                 { id: 'reps', label: 'Reps' },
                 { id: 'hold', label: 'Hold (s)' },

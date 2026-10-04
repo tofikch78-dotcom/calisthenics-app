@@ -11,11 +11,12 @@ import {
 import {
   DAY_SHORT,
   formatDuration,
+  fromDateKey,
   monthGrid,
   monthTitle,
   relativeDay,
-  todayKey,
 } from '../lib/dates'
+import { useTodayKey } from '../lib/use-today'
 import type { Profile, Workout, WorkoutSession } from '../types'
 import { Card, IconChevron, Pill, ProgressBar, StatTile } from './kit'
 
@@ -27,10 +28,10 @@ export interface CalendarViewProps {
 }
 
 export function CalendarView({ sessions, workouts, profile, onOpenSession }: CalendarViewProps) {
-  const today = todayKey()
+  const today = useTodayKey()
   const [cursor, setCursor] = useState(() => {
-    const now = new Date()
-    return { year: now.getFullYear(), month: now.getMonth() }
+    const date = fromDateKey(today)
+    return { year: date.getFullYear(), month: date.getMonth() }
   })
   const [selected, setSelected] = useState<string | null>(null)
 
@@ -41,14 +42,14 @@ export function CalendarView({ sessions, workouts, profile, onOpenSession }: Cal
   const shift = (delta: number) => {
     const date = new Date(cursor.year, cursor.month + delta, 1)
     setCursor({ year: date.getFullYear(), month: date.getMonth() })
+    // The day detail belongs to the month on screen; carrying it across would
+    // leave a panel about a date that is no longer anywhere in view.
+    setSelected(null)
   }
 
-  const monthCount = grid.filter(
-    (key) => key.startsWith(`${cursor.year}-${`${cursor.month + 1}`.padStart(2, '0')}`),
-  ).length
-  const monthSessions = grid
-    .filter((key) => key.startsWith(`${cursor.year}-${`${cursor.month + 1}`.padStart(2, '0')}`))
-    .flatMap((key) => byDate.get(key) ?? [])
+  const inThisMonth = (key: string) => key.startsWith(`${cursor.year}-${`${cursor.month + 1}`.padStart(2, '0')}`)
+  const monthSessions = grid.filter(inThisMonth).flatMap((key) => byDate.get(key) ?? [])
+  const monthSeconds = monthSessions.reduce((sum, session) => sum + (session.durationSec ?? 0), 0)
 
   return (
     <div className="space-y-4">
@@ -82,7 +83,7 @@ export function CalendarView({ sessions, workouts, profile, onOpenSession }: Cal
 
           {grid.map((key) => {
             const status = dayStatus(key, byDate, plannedDays)
-            const inMonth = new Date(`${key}T00:00:00`).getMonth() === cursor.month
+            const inMonth = fromDateKey(key).getMonth() === cursor.month
             const isToday = key === today
             const isSelected = key === selected
             return (
@@ -122,21 +123,15 @@ export function CalendarView({ sessions, workouts, profile, onOpenSession }: Cal
       </Card>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatTile value={monthCount} label="Days in month" />
-        <StatTile
-          value={monthSessions.filter((s) => s.status === 'completed').length}
-          label="Workouts completed"
-          tone="ok"
-        />
+        <StatTile value={grid.filter(inThisMonth).length} label="Days in month" />
+        <StatTile value={monthSessions.filter((s) => s.status === 'completed').length} label="Workouts completed" tone="ok" />
         <StatTile
           value={monthSessions.filter((s) => s.status === 'partial').length}
           label="Partially completed"
           tone="warn"
         />
         <StatTile
-          value={monthSessions.reduce((sum, s) => sum + (s.durationSec ?? 0), 0) > 0
-            ? formatDuration(monthSessions.reduce((sum, s) => sum + (s.durationSec ?? 0), 0))
-            : '0m'}
+          value={monthSeconds > 0 ? formatDuration(monthSeconds) : '0m'}
           label="Time trained"
         />
       </div>
@@ -174,7 +169,9 @@ function DayDetail({
     <Card className="animate-rise">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-mist-100">{relativeDay(date)}</h3>
-        <Pill className="bg-ink-800 text-mist-300 ring-ink-600">{sessions.length} session(s)</Pill>
+        <Pill className="bg-ink-800 text-mist-300 ring-ink-600">
+          {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
+        </Pill>
       </div>
 
       <ul className="space-y-3">
@@ -258,9 +255,10 @@ function DayDetail({
               <button
                 type="button"
                 onClick={() => onOpenSession(session)}
-                className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] text-brand-300 transition hover:text-brand-200"
+                className="-ml-1 mt-1 inline-flex min-h-11 items-center gap-1.5 px-1 text-[11px] text-brand-300 transition hover:text-brand-200"
               >
-                Open on the Workout tab →
+                {/* It opens the read-only review sheet, not the Workout tab. */}
+                Open this session →
               </button>
             </li>
           )

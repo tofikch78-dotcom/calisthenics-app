@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEscape } from '../lib/use-escape'
 
 /**
  * Shared UI kit for the newer screens (dashboard, session runner, nutrition,
@@ -170,8 +171,13 @@ export { IconCheck, IconClose, IconPlus, IconTrash } from './ui'
 
 /* ── Form primitives ────────────────────────────────────────────────────── */
 
+/*
+ * `py-2` around a 14px line box came to 38px, which is under the 44px a thumb
+ * needs. `min-h-11` raises the field without changing the type size or the gap
+ * around it, so forms keep their rhythm and only the target grows.
+ */
 const fieldBase =
-  'w-full rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 placeholder:text-ink-500 focus:border-brand-400/70 focus:outline-none'
+  'w-full min-h-11 rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-mist-100 placeholder:text-ink-500 focus:border-brand-400/70 focus:outline-none'
 
 function FieldLabel({ children, hint }: { children: ReactNode; hint?: string }) {
   return (
@@ -475,7 +481,9 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.id)}
-            className={`min-h-11 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+            // `min-h-11` alone left a short label like "All" at 38px wide, so the
+            // shortest option in a filter row was the hardest to tap.
+            className={`min-h-11 min-w-11 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
               active ? 'bg-brand-500/18 text-brand-300' : 'text-mist-400 hover:text-mist-100'
             }`}
           >
@@ -533,6 +541,7 @@ export function Sheet({
   footer?: ReactNode
   wide?: boolean
 }) {
+  useEscape(onClose)
   return (
     <div
       role="dialog"
@@ -558,7 +567,10 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-lg p-2 text-mist-400 transition hover:bg-ink-800 hover:text-white"
+            // `p-2` around a 24px glyph came to 32x32, which is not a thumb
+            // target. `size-11` on the button keeps the icon the same size and
+            // only widens the thing you actually have to hit.
+            className="-mr-1.5 grid size-11 shrink-0 place-items-center rounded-lg text-mist-400 transition hover:bg-ink-800 hover:text-white"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={base} aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" />

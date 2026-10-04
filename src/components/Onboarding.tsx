@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
-import { EQUIPMENT, EQUIPMENT_ORDER, getExercise } from '../data'
+import { getExercise } from '../data'
+import { EQUIPMENT_ORDER } from '../data/taxonomy'
 import { DAY_NAMES, DAY_SHORT } from '../lib/dates'
-import { DIET_LABEL, autoTargets, goalLabel } from '../lib/nutrition'
+import { equipmentLabel, equipmentMeta } from '../lib/labels'
+import { DIET_LABEL, autoTargets, dietLabel, goalLabel } from '../lib/nutrition'
 import { assessLevels, mergeLevels } from '../lib/level'
 import { DEFAULT_PROFILE } from '../lib/store'
 import type { Difficulty, Equipment, Goal, Profile, PullUpAbility, Sex, TrainingLevel } from '../types'
@@ -238,7 +240,7 @@ export function Onboarding({ initial, onComplete, onCancel, title, subtitle }: O
               <div className="mt-2 flex flex-wrap gap-2">
                 {(Object.keys(DIET_LABEL) as Profile['diet'][]).map((diet) => (
                   <Chip key={diet} pressed={draft.diet === diet} onClick={() => patch({ diet })}>
-                    {DIET_LABEL[diet]}
+                    {dietLabel(diet)}
                   </Chip>
                 ))}
               </div>
@@ -326,9 +328,9 @@ export function Onboarding({ initial, onComplete, onCancel, title, subtitle }: O
                   key={item}
                   pressed={draft.equipment.includes(item)}
                   onClick={() => toggleEquipment(item)}
-                  title={EQUIPMENT[item].hint}
+                  title={equipmentMeta(item).hint}
                 >
-                  {EQUIPMENT[item].label}
+                  {equipmentMeta(item).label}
                 </Chip>
               ))}
             </div>
@@ -508,12 +510,12 @@ function ReviewStep({
             ['Max dips', draft.maxDips ?? '—'],
             ['Max squats', draft.maxSquats ?? '—'],
             ['Max pull-ups', draft.maxPullups ?? '—'],
-            ['Equipment', draft.equipment.map((e) => EQUIPMENT[e].label).join(', ') || '—'],
+            ['Equipment', draft.equipment.map(equipmentLabel).join(', ') || '—'],
             ['Days per week', `${draft.daysPerWeek}`],
             ['Preferred days', draft.preferredDays.join(', ') || '—'],
             ['Session length', `${draft.sessionMinutes} min`],
             ['Meals per day', `${draft.mealsPerDay}`],
-            ['Diet', DIET_LABEL[draft.diet]],
+            ['Diet', dietLabel(draft.diet)],
             [
               'Goals',
               draft.goals.length ? draft.goals.map(goalLabel).join(', ') : '—',

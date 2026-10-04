@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import { addDays, relativeDay, todayKey, DAY_SHORT, fromDateKey, formatDateKey } from '../lib/dates'
 import {
   ALL_MEAL_SLOTS,
-  DIET_LABEL,
   autoTargets,
+  dietLabel,
   goalLabel,
   sumMacros,
   type MacroTotals,
@@ -256,7 +256,15 @@ export function NutritionView({
       <Card>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-mist-100">Today’s nutrition</h3>
+            {/*
+              The day is navigable, so the heading has to follow it: the pill on
+              the right says "Yesterday" and this used to still say "Today".
+              `relativeDay` reads as a label on its own for today, and as a
+              date for anything else, which is what both want here.
+            */}
+            <h3 className="text-sm font-semibold text-mist-100">
+              {date === todayKey() ? 'Today’s nutrition' : `${relativeDay(date)}’s nutrition`}
+            </h3>
             <p className="mt-0.5 text-[11px] text-mist-400">
               Targets are an estimate from your profile
               {profile?.goals.length ? ` (${profile.goals.map(goalLabel).join(', ')})` : ''} — not medical
@@ -307,7 +315,7 @@ export function NutritionView({
           <p className="mb-3 rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11px] text-mist-400">
             Auto-calculated: {auto.kcal} kcal · {auto.protein} g protein · {auto.carbs} g carbs ·{' '}
             {auto.fat} g fat · {(auto.waterMl / 1000).toFixed(1)} L water. Based on{' '}
-            {profile?.diet ? DIET_LABEL[profile.diet].toLowerCase() : 'your'} preferences.
+            {profile?.diet ? dietLabel(profile.diet).toLowerCase() : 'your'} preferences.
           </p>
         ) : (
           <button

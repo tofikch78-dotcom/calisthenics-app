@@ -1,12 +1,18 @@
-import { getExercise } from '../data'
-import { addDays, dayNameOf, startOfWeek, todayKey, weekDays } from './dates'
+/*
+ * The `.ts` extensions on the two runtime imports below are load-bearing, not
+ * decoration: Node's ESM resolver does not guess an extension for a bare
+ * specifier, and type-only imports are erased before it ever looks. They are
+ * what lets `verify-progress.mjs` import this file directly and check the streak,
+ * the week summary and the totals as pure functions.
+ */
+import { addDays, dayNameOf, startOfWeek, todayKey, weekDays } from './dates.ts'
 import {
   deriveSessionStatus,
   emptySessionStats,
   isTraining,
   sessionStats,
   type SessionStats,
-} from './session-stats'
+} from './session-stats.ts'
 import type { Profile, Workout, WorkoutSession } from '../types'
 
 /* ── Per-session maths ───────────────────────────────────────────────────── */
@@ -18,6 +24,15 @@ import type { Profile, Workout, WorkoutSession } from '../types'
  * them from here.
  */
 export { deriveSessionStatus, emptySessionStats, isTraining, sessionStats, type SessionStats }
+
+/*
+ * Everything in this file is pure arithmetic over stored sessions, the profile's
+ * planned days and the calendar — no exercise catalogue. That is what lets
+ * `verify-progress.mjs` check the streak, the week summary and the all-time
+ * totals directly instead of through the screen. The one Progress-side reading
+ * that does need the library, the record candidates a finished session
+ * produces, lives in `record-candidates.ts`.
+ */
 
 /* ── Calendar status ────────────────────────────────────────────────────── */
 
@@ -109,7 +124,13 @@ export function plannedWeekdays(profile: Profile | null, workouts: Workout[]): S
 export interface StreakInfo {
   /** Consecutive training days. Rest days are skipped, not counted against. */
   days: number
-  /** The most recent training day, or null if there is none. */
+  /**
+   * The day the streak ended on — today when it is live, otherwise the last day
+   * the run reached before a missed planned day stopped it. Null when nothing
+   * was trained inside the run, which is not the same as "never trained": a
+   * streak that died yesterday names yesterday's predecessor, or nothing if the
+   * missed planned day came first.
+   */
   lastTrainedOn: string | null
   /** True when the streak ends today (or has not been extended yet today). */
   active: boolean
@@ -166,13 +187,27 @@ export interface WeekSummary {
   start: string
   end: string
   days: string[]
+  /**
+   * Days in the week the user was expected to train: a day with any session
+   * logged, or a planned weekday they left empty. Counted in days so it lines
+   * up with `completed` / `partial` / `skipped`, which are day statuses — two
+   * sessions on one planned day used to read as "1/2 completed".
+   */
   planned: number
   /** Sessions actually logged inside the week, whatever their outcome. */
   sessions: number
   completed: number
   partial: number
   skipped: number
-  /** completed + partial, as a share of everything that was planned or attempted. */
+  /**
+   * How much of the prescribed work was actually done, as a percentage.
+   *
+   * The mean of each attended session's set completion — **not** a share of
+   * days. A week of four days where one day was half-finished scores 88, not
+   * 75, and reading it as "days finished" (next to `completed` / `planned`)
+   * overstates it. `completed + partial` in days is the attendance figure; this
+   * is the effort figure.
+   */
   completion: number
   exercises: number
   sets: number
@@ -214,8 +249,7 @@ export function weekSummary(
 
   for (const date of days) {
     const daySessions = byDate.get(date) ?? []
-    if (daySessions.length) summary.planned += daySessions.length
-    else if (plannedDays.has(dayNameOf(date))) summary.planned += 1
+    if (daySessions.length || plannedDays.has(dayNameOf(date))) summary.planned += 1
 
     const status = dayStatus(date, byDate, plannedDays)
     summary.byDay.push({ date, status })
@@ -237,11 +271,8 @@ export function weekSummary(
     }
   }
 
-  summary.completion = attended
-    ? Math.round((credited / attended) * 100)
-    : summary.planned
-      ? 0
-      : 0
+  // A week nothing was attempted in is 0%, not an average of nothing.
+  summary.completion = attended ? Math.round((credited / attended) * 100) : 0
 
   return summary
 }
@@ -280,16 +311,30 @@ export function totals(sessions: WorkoutSession[], profile: Profile | null, work
     result.seconds += session.durationSec ?? 0
   }
 
-  // Longest run of consecutive training dates, rest days ignored.
+  /*
+   * Longest run of consecutive training dates, using the same rule as
+   * `computeStreak`: a plain rest day is skipped, but a planned day the user
+   * missed ends the run.
+   *
+   * The gap between two training days is walked day by day. Checking only the
+   * day the gap *ends* on let a streak survive a missed Wednesday when the user
+   * trained Monday and then Thursday, so "best streak" could disagree with the
+   * streak being shown right next to it.
+   */
+  const plannedDays = plannedWeekdays(profile, workouts)
+  const missedPlannedDay = (from: string, to: string) => {
+    for (let cursor = addDays(from, 1); cursor < to; cursor = addDays(cursor, 1)) {
+      if (plannedDays.has(dayNameOf(cursor)) && !(byDate.get(cursor) ?? []).some(isTraining)) {
+        return true
+      }
+    }
+    return false
+  }
+
   let run = 0
   let previous: string | null = null
   for (const date of trainingDates) {
-    if (previous && date !== addDays(previous, 1) && (byDate.get(date) ?? []).length) {
-      // A day that was logged but skipped still counts as a break only if it
-      // was planned; otherwise it is simply a rest day.
-      const planned = plannedWeekdays(profile, workouts).has(dayNameOf(date))
-      if (planned) run = 0
-    }
+    if (previous && date !== addDays(previous, 1) && missedPlannedDay(previous, date)) run = 0
     run += 1
     result.bestStreak = Math.max(result.bestStreak, run)
     previous = date
@@ -311,42 +356,9 @@ export function history(sessions: WorkoutSession[]): HistoryEntry[] {
     .map((session) => ({ session, stats: sessionStats(session) }))
 }
 
-/* ── Records derived from a finished session ─────────────────────────────── */
-
-export interface RecordCandidate {
-  exerciseId: string
-  name: string
-  metric: 'reps' | 'hold' | 'weight'
-  value: number
-  unit: string
-}
-
-/**
- * Personal-record candidates inside a session: the best single set, and the
- * best added load. Callers decide whether each value actually beats a record.
+/*
+ * The records a finished session produces are derived in
+ * `record-candidates.ts`, which is the one Progress-side reading that has to
+ * resolve an exercise in the library.
  */
-export function recordCandidates(session: WorkoutSession): RecordCandidate[] {
-  const out: RecordCandidate[] = []
-  for (const item of session.items) {
-    const exercise = getExercise(item.exerciseId)
-    if (!exercise) continue
-    const done = item.sets.filter((set) => set.status === 'done')
-
-    const bestReps = done.reduce((max, set) => Math.max(max, set.reps ?? 0), 0)
-    if (bestReps > 0) {
-      out.push({ exerciseId: item.exerciseId, name: exercise.name, metric: 'reps', value: bestReps, unit: 'reps' })
-    }
-
-    const bestHold = done.reduce((max, set) => Math.max(max, set.holdSec ?? 0), 0)
-    if (bestHold > 0) {
-      out.push({ exerciseId: item.exerciseId, name: exercise.name, metric: 'hold', value: bestHold, unit: 's' })
-    }
-
-    const bestWeight = done.reduce((max, set) => Math.max(max, set.weight ?? 0), 0)
-    if (bestWeight > 0) {
-      out.push({ exerciseId: item.exerciseId, name: exercise.name, metric: 'weight', value: bestWeight, unit: 'kg' })
-    }
-  }
-  return out
-}
 

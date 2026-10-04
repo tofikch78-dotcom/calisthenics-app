@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { getExercise } from '../data'
-import { MUSCLES } from '../data/taxonomy'
+import { muscleLabel } from '../lib/labels'
 import type { Exercise, Muscle, Workout } from '../types'
 import {
   Button,
@@ -243,7 +243,7 @@ export function WorkoutsView({
                 </div>
                 {muscles.length > 0 && (
                   <p className="mt-1.5 text-[10px] text-mist-500">
-                    {muscles.map((muscle) => MUSCLES[muscle].label).join(' · ')}
+                    {muscles.map(muscleLabel).join(' · ')}
                   </p>
                 )}
               </li>

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getExercise } from '../data'
-import { MUSCLES, MUSCLE_ORDER } from '../data/taxonomy'
-import { equipmentLabel, muscleLabel } from '../lib/labels'
+import { MUSCLE_ORDER } from '../data/taxonomy'
+import { equipmentLabel, muscleLabel, muscleMeta } from '../lib/labels'
 import {
   exercisesForMuscles,
   formatDosage,
   formatRest,
-  MUSCLE_EXERCISE_COUNTS,
+  muscleExerciseCount,
   queryLibrary,
   targetsMuscle,
   type SortKey,
@@ -28,6 +28,7 @@ import {
   IconTrash,
   IconUp,
   MusclePill,
+  PlayPauseGlyph,
   SectionHeading,
   Tag,
 } from './ui'
@@ -78,7 +79,7 @@ function MuscleStep({
   return (
     <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
       {MUSCLE_ORDER.map((muscle) => {
-        const counts = MUSCLE_EXERCISE_COUNTS[muscle]
+        const counts = muscleExerciseCount(muscle)
         const on = selected.includes(muscle)
         return (
           <li key={muscle}>
@@ -86,7 +87,7 @@ function MuscleStep({
               type="button"
               onClick={() => onToggle(muscle)}
               aria-pressed={on}
-              aria-label={`${on ? 'Remove' : 'Choose'} ${MUSCLES[muscle].label}, ${counts.all} exercises`}
+              aria-label={`${on ? 'Remove' : 'Choose'} ${muscleLabel(muscle)}, ${counts.all} exercises`}
               className={`flex min-h-16 w-full flex-col items-start justify-center gap-0.5 rounded-xl border p-3 text-left transition ${
                 on
                   ? 'border-brand-400 bg-brand-500/12 ring-1 ring-brand-400/40'
@@ -108,7 +109,7 @@ function MuscleStep({
                 <span className="tnum ml-auto text-[11px] text-mist-400">{counts.all}</span>
               </span>
               <span className={`truncate text-[11px] ${on ? 'text-mist-300' : 'text-mist-500'}`}>
-                {MUSCLES[muscle].hint}
+                {muscleMeta(muscle).hint}
               </span>
             </button>
           </li>
@@ -147,12 +148,12 @@ function MuscleSummary({
             key={muscle}
             className="inline-flex items-center gap-1 rounded-lg bg-brand-500/15 py-1 pr-1 pl-2.5 text-xs font-medium text-brand-300 ring-1 ring-brand-400/30"
           >
-            {MUSCLES[muscle].label}
+            {muscleLabel(muscle)}
             <button
               type="button"
               onClick={() => onRemove(muscle)}
-              aria-label={`Remove ${MUSCLES[muscle].label} from this workout`}
-              className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2 before:content-['']"
+              aria-label={`Remove ${muscleLabel(muscle)} from this workout`}
+              className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2.5 before:content-['']"
             >
               <IconClose className="h-3 w-3" />
             </button>
@@ -243,8 +244,8 @@ function ExerciseChoice({
               aria-pressed={playing}
               className="absolute -right-2.5 -bottom-2.5 z-20 grid size-11 place-items-center rounded-full text-mist-300 transition hover:text-brand-300"
             >
-              <span className="grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-[7px] leading-none">
-                {playing ? '❚❚' : '▶'}
+              <span className="grid size-4 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85">
+                <PlayPauseGlyph playing={playing} />
               </span>
             </button>
           )}
@@ -364,9 +365,9 @@ function ItemRow({
                 playing ? `Pause the ${exercise.name} animation` : `Play the ${exercise.name} animation`
               }
               aria-pressed={playing}
-              className="absolute -right-1 -bottom-1 z-20 grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900 text-[7px] leading-none text-mist-300 before:absolute before:-inset-3.5 before:content-['']"
+              className="absolute -right-1 -bottom-1 z-20 grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900 text-mist-300 before:absolute before:-inset-3.5 before:content-['']"
             >
-              {playing ? '❚❚' : '▶'}
+              <PlayPauseGlyph playing={playing} />
             </button>
           )}
           <button
@@ -701,8 +702,8 @@ export function WorkoutEditor({
     if (searching || !selected.length) return null
     const blocks: MuscleGroup[] = selected.map((muscle) => ({
       key: muscle,
-      title: MUSCLES[muscle].label,
-      hint: `primary mover · ${MUSCLE_EXERCISE_COUNTS[muscle].primary} movements`,
+      title: muscleLabel(muscle),
+      hint: `primary mover · ${muscleExerciseCount(muscle).primary} movements`,
       rows: candidates.filter((exercise) => exercise.mainMuscle === muscle),
     }))
     const helpers = candidates.filter((exercise) => !selected.includes(exercise.mainMuscle))
@@ -893,12 +894,12 @@ export function WorkoutEditor({
                 key={muscle}
                 className="inline-flex items-center gap-1 rounded-lg bg-brand-500/15 py-1 pr-1 pl-2.5 text-xs font-medium text-brand-300 ring-1 ring-brand-400/30"
               >
-                {MUSCLES[muscle].label}
+                {muscleLabel(muscle)}
                 <button
                   type="button"
                   onClick={() => changeList(() => removeMuscle(muscle))}
-                  aria-label={`Remove ${MUSCLES[muscle].label} from this workout`}
-                  className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2 before:content-['']"
+                  aria-label={`Remove ${muscleLabel(muscle)} from this workout`}
+                  className="relative grid size-6 place-items-center rounded text-brand-300/80 transition hover:text-brand-200 before:absolute before:-inset-2.5 before:content-['']"
                 >
                   <IconClose className="h-3 w-3" />
                 </button>
@@ -932,10 +933,7 @@ export function WorkoutEditor({
                   }`}
                 >
                   Primary only{' '}
-                  {selected.reduce(
-                    (sum, muscle) => sum + MUSCLE_EXERCISE_COUNTS[muscle].primary,
-                    0,
-                  )}
+                  {selected.reduce((sum, muscle) => sum + muscleExerciseCount(muscle).primary, 0)}
                 </button>
               </div>
             )}

@@ -40,8 +40,24 @@ export function SkillsView({
     onOpenConsumed?.()
   }
 
-  const stageBySkill = new Map(progress.map((entry) => [entry.skillId, entry.stageExerciseId]))
+  /*
+   * Only the entries a card can actually place. `SkillCard` finds the rung with
+   * `ladder.stages.indexOf(currentStage)`, so a stage id this build's ladder no
+   * longer lists renders as "Not started" — but counting it anyway made the
+   * summary above read "1 of 8 skills started" over eight cards that all said
+   * the same thing. Matching the count to what the cards show fixes the
+   * contradiction and leaves the entry in storage for the user to re-mark.
+   */
+  const stageBySkill = new Map(
+    progress
+      .filter((entry) => {
+        const ladder = SKILL_LADDERS.find((item) => item.id === entry.skillId)
+        return Boolean(ladder && ladder.stages.includes(entry.stageExerciseId))
+      })
+      .map((entry) => [entry.skillId, entry.stageExerciseId]),
+  )
   const active = SKILL_LADDERS.filter((ladder) => stageBySkill.has(ladder.id)).length
+  const openLadder = openId ? SKILL_LADDERS.find((item) => item.id === openId) : undefined
 
   return (
     <div className="space-y-4">
@@ -70,11 +86,17 @@ export function SkillsView({
         ))}
       </div>
 
-      {openId && (
+      {/*
+        Resolved from the id rather than asserted non-null: `openId` can arrive
+        as a deep link from a suggestion, and a ladder that has been renamed or
+        retired since then has no entry to find. Nothing renders rather than
+        the whole tab going down over it.
+      */}
+      {openLadder && (
         <SkillSheet
-          ladder={SKILL_LADDERS.find((item) => item.id === openId)!}
-          currentStage={stageBySkill.get(openId)}
-          onSetStage={(stage) => onSetStage(openId, stage)}
+          ladder={openLadder}
+          currentStage={stageBySkill.get(openId!)}
+          onSetStage={(stage) => onSetStage(openId!, stage)}
           onOpenExercise={onOpenExercise}
           onClose={() => setOpenId(null)}
         />

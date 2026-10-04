@@ -82,14 +82,25 @@ export function autoTargets(profile: Profile | null): NutritionTargets {
 }
 
 export function goalLabel(goal: Goal): string {
-  return {
-    'gain-muscle': 'Gain muscle',
-    'gain-weight': 'Gain weight',
-    maintain: 'Maintain',
-    'lose-weight': 'Lose weight',
-    strength: 'Increase strength',
-    skills: 'Improve calisthenics skills',
-  }[goal]
+  return GOAL_LABEL[goal] ?? 'Other'
+}
+
+const GOAL_LABEL: Record<Goal, string> = {
+  'gain-muscle': 'Gain muscle',
+  'gain-weight': 'Gain weight',
+  maintain: 'Maintain',
+  'lose-weight': 'Lose weight',
+  strength: 'Increase strength',
+  skills: 'Improve calisthenics skills',
+}
+
+/**
+ * A diet this build has no label for reads as "Other" rather than rendering
+ * nothing: `DIET_LABEL` is indexed straight off stored data by the profile
+ * header, and `NutritionView` lower-cases the result for a sentence.
+ */
+export function dietLabel(diet: string): string {
+  return DIET_LABEL[diet as Profile['diet']] ?? DIET_LABEL.other
 }
 
 export const DIET_LABEL: Record<Profile['diet'], string> = {

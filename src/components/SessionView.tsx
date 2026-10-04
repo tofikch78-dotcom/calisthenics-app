@@ -4,6 +4,7 @@ import { formatDuration, relativeDay } from '../lib/dates'
 import { formatRest } from '../lib/search'
 import { REST_ADJUST_SECONDS, prescribedRest, useRestTimer } from '../lib/rest-timer'
 import { sessionStats } from '../lib/stats'
+import { useEscape } from '../lib/use-escape'
 import {
   FEELINGS,
   ITEM_STATUS_META,
@@ -30,7 +31,7 @@ import {
   ProgressRing,
   TextArea,
 } from './kit'
-import { DifficultyBadge, MusclePill } from './ui'
+import { DifficultyBadge, MusclePill, PlayPauseGlyph } from './ui'
 
 export interface SessionViewProps {
   session: WorkoutSession
@@ -264,39 +265,60 @@ export function SessionView({
       </div>
 
       {confirmFinish && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Finish workout"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-6"
-        >
-          <div className="animate-rise w-full rounded-t-3xl border border-ink-600 bg-ink-900 p-5 sm:max-w-md sm:rounded-3xl">
-            <h2 className="text-base font-bold text-white">Finish this workout?</h2>
-            <p className="mt-2 text-sm text-mist-300">
-              {stats.setsDone} of {stats.setsTotal} sets completed across {session.items.length}{' '}
-              {session.items.length === 1 ? 'exercise' : 'exercises'}. It will be filed under{' '}
-              {relativeDay(session.date).toLowerCase()} and counted as{' '}
-              {stats.completion === 100 ? 'completed' : stats.setsDone ? 'partially completed' : 'skipped'}.
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmFinish(false)}
-                className="flex-1 rounded-lg border border-ink-600 py-2.5 text-sm font-medium text-mist-200"
-              >
-                Keep going
-              </button>
-              <button
-                type="button"
-                onClick={onFinish}
-                className="flex-1 rounded-lg bg-lime-glow py-2.5 text-sm font-semibold text-ink-950"
-              >
-                Finish
-              </button>
-            </div>
-          </div>
-        </div>
+        <FinishConfirm session={session} stats={stats} onFinish={onFinish} onCancel={() => setConfirmFinish(false)} />
       )}
+    </div>
+  )
+}
+
+/**
+ * The last stop before a session is filed. Its own component so the Escape
+ * listener only exists while it is on screen.
+ */
+function FinishConfirm({
+  session,
+  stats,
+  onFinish,
+  onCancel,
+}: {
+  session: WorkoutSession
+  stats: ReturnType<typeof sessionStats>
+  onFinish: () => void
+  onCancel: () => void
+}) {
+  useEscape(onCancel)
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Finish workout"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-6"
+    >
+      <div className="animate-rise w-full rounded-t-3xl border border-ink-600 bg-ink-900 p-5 sm:max-w-md sm:rounded-3xl">
+        <h2 className="text-base font-bold text-white">Finish this workout?</h2>
+        <p className="mt-2 text-sm text-mist-300">
+          {stats.setsDone} of {stats.setsTotal} sets completed across {session.items.length}{' '}
+          {session.items.length === 1 ? 'exercise' : 'exercises'}. It will be filed under{' '}
+          {relativeDay(session.date).toLowerCase()} and counted as{' '}
+          {stats.completion === 100 ? 'completed' : stats.setsDone ? 'partially completed' : 'skipped'}.
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-lg border border-ink-600 py-2.5 text-sm font-medium text-mist-200"
+          >
+            Keep going
+          </button>
+          <button
+            type="button"
+            onClick={onFinish}
+            className="flex-1 rounded-lg bg-lime-glow py-2.5 text-sm font-semibold text-ink-950"
+          >
+            Finish
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -442,8 +464,8 @@ function SessionItemCard({
                */
               className="absolute -right-2 -bottom-2 z-20 grid size-11 place-items-center rounded-full text-mist-300 transition hover:text-brand-300"
             >
-              <span className="grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900 text-[7px] leading-none">
-                {playing ? '❚❚' : '▶'}
+              <span className="grid size-4 place-items-center rounded-full border border-ink-600 bg-ink-900">
+                <PlayPauseGlyph playing={playing} />
               </span>
             </button>
           )}

@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { LIBRARY } from '../data'
 import { queryLibrary, type SortKey } from '../lib/search'
 import type { Exercise } from '../types'
+import { useEscape } from '../lib/use-escape'
 import { ExerciseAnimation } from './ExerciseAnimation'
-import { DifficultyBadge, IconClose, IconSearch, MusclePill } from './ui'
+import { DifficultyBadge, IconClose, IconSearch, MusclePill, PlayPauseGlyph } from './ui'
 
 export interface ExercisePickerProps {
   savedIds: ReadonlySet<string>
@@ -48,9 +49,9 @@ function PickerRow({
               playing ? `Pause the ${exercise.name} animation` : `Play the ${exercise.name} animation`
             }
             aria-pressed={playing}
-            className="absolute right-0 bottom-0 z-10 grid size-3.5 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-[6px] leading-none text-mist-300"
+            className="absolute right-0 bottom-0 z-10 grid size-3.5 place-items-center rounded-full border border-ink-600/80 bg-ink-900/85 text-mist-300"
           >
-            {playing ? '❚❚' : '▶'}
+            <PlayPauseGlyph playing={playing} className="h-1.5 w-1.5" />
           </button>
         )}
       </span>
@@ -84,6 +85,7 @@ function PickerRow({
 export function ExercisePicker({ savedIds, presentIds, onPick, onClose }: ExercisePickerProps) {
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState<Scope>(savedIds.size ? 'mine' : 'all')
+  useEscape(onClose)
 
   const results = useMemo(() => {
     const base = queryLibrary(

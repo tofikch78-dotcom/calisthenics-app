@@ -236,7 +236,7 @@ function PlanRow({
           <button
             type="button"
             onClick={onEdit}
-            className="rounded-lg border border-ink-600 px-2.5 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
+            className="min-h-11 min-w-11 rounded-lg border border-ink-600 px-2.5 py-1.5 text-[11px] text-mist-300 transition hover:border-ink-500"
           >
             Edit
           </button>
@@ -244,7 +244,7 @@ function PlanRow({
             type="button"
             onClick={() => onStart(workout)}
             disabled={!workout.items.length}
-            className="inline-flex items-center gap-1 rounded-lg bg-lime-glow px-3 py-1.5 text-[11px] font-semibold text-ink-950 transition hover:brightness-110 disabled:bg-ink-700 disabled:text-ink-500"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-lime-glow px-3 py-1.5 text-[11px] font-semibold text-ink-950 transition hover:brightness-110 disabled:bg-ink-700 disabled:text-ink-500"
           >
             <IconPlay className="h-3 w-3" /> Start
           </button>

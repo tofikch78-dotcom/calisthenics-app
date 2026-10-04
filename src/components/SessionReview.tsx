@@ -97,7 +97,7 @@ export function SessionReview({
                   <button
                     type="button"
                     onClick={() => onOpenExercise(exercise)}
-                    className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-mist-100 transition hover:text-brand-300"
+                    className="min-w-0 flex-1 truncate py-1 text-left text-sm font-semibold text-mist-100 transition hover:text-brand-300 -my-1"
                   >
                     {exercise.name}
                   </button>

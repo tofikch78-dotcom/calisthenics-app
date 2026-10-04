@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { interpolatePose, resolvePoses } from '../lib/poses'
+import { PlayPauseGlyph } from './ui'
 import type { InterpolatedPose, Pose, Scene } from '../lib/poses'
 
 const SCENE_PROPS: Record<Scene, { ground: boolean; wall: boolean; pullBar: boolean; lowBar: boolean; dipBars: boolean; rings: boolean; bench: boolean; box: boolean; chair: boolean; pole: boolean }> = {
@@ -310,9 +311,10 @@ export function ExerciseAnimation({
           type="button"
           onClick={() => setPlaying(!playing)}
           aria-label={playing ? `Pause the ${label ?? 'movement'} animation` : `Play the ${label ?? 'movement'} animation`}
-          className="absolute right-1 bottom-1 min-h-11 rounded-full border border-ink-600/80 bg-ink-900/80 px-3.5 py-2 text-[11px] font-medium text-mist-300 backdrop-blur transition hover:border-brand-400/60 hover:text-brand-300"
+          className="absolute right-1 bottom-1 inline-flex min-h-11 items-center gap-1.5 rounded-full border border-ink-600/80 bg-ink-900/80 px-3.5 py-2 text-[11px] font-medium text-mist-300 backdrop-blur transition hover:border-brand-400/60 hover:text-brand-300"
         >
-          {playing ? '❚❚ Pause' : '▶ Animate'}
+          <PlayPauseGlyph playing={playing} className="h-2.5 w-2.5" />
+          {playing ? 'Pause' : 'Animate'}
         </button>
       )}
     </figure>

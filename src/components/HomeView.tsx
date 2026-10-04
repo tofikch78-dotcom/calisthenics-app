@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { getExercise } from '../data'
 import { SKILL_LADDERS } from '../data/skill-ladders'
 import { dayNameOf, formatDuration, relativeDay, startOfWeek, todayKey } from '../lib/dates'
-import { allSuggestions } from '../lib/progression'
+import { progressionReport } from '../lib/progression'
 import { isTraining, sessionStats, totals, weekSummary, type StreakInfo } from '../lib/stats'
 import { autoTargets, goalLabel } from '../lib/nutrition'
 import type { Exercise, Profile, RecordEntry, Workout, WorkoutSession } from '../types'
@@ -72,15 +72,28 @@ export function HomeView({
   )
 
   const suggestion = useMemo(() => {
-    const trainedIds = [
+    const trained = [
       ...new Set(sessions.filter(isTraining).flatMap((session) => session.items.map((item) => item.exerciseId))),
     ]
-    return allSuggestions(sessions, trainedIds)[0]
+      .map((id) => getExercise(id))
+      .filter((exercise): exercise is Exercise => Boolean(exercise))
+    return progressionReport(sessions, trained, getExercise).suggestions[0]
   }, [sessions])
 
-  const latestPR = useMemo(
-    () => [...records].sort((a, b) => b.achievedAt - a.achievedAt)[0],
+  /*
+   * Only the records this build can name. RecordsView drops the same ones, so
+   * without this filter Home could headline a raw exercise id from a session
+   * logged by a build that has since renamed or removed it, and the "Records
+   * set" tile would count a best the user cannot open anywhere.
+   */
+  const visibleRecords = useMemo(
+    () => records.filter((record) => Boolean(getExercise(record.exerciseId))),
     [records],
+  )
+
+  const latestPR = useMemo(
+    () => [...visibleRecords].sort((a, b) => b.achievedAt - a.achievedAt)[0],
+    [visibleRecords],
   )
 
   // Resolved once on mount: the clock should not tick under the user.
@@ -205,7 +218,7 @@ export function HomeView({
         <StatTile value={all.sessions} label="Sessions all-time" />
         <StatTile value={all.reps} label="Total reps" />
         <StatTile value={all.bestStreak} label="Best streak" tone="brand" />
-        <StatTile value={records.length} label="Records set" tone="brand" />
+        <StatTile value={visibleRecords.length} label="Records set" tone="brand" />
       </div>
 
       {latestPR && (
@@ -214,7 +227,7 @@ export function HomeView({
             <div className="min-w-0">
               <p className="text-[10px] tracking-wide text-amber-glow uppercase">Latest record</p>
               <p className="mt-0.5 text-sm font-semibold text-mist-100">
-                🎉 {getExercise(latestPR.exerciseId)?.name ?? latestPR.exerciseId}
+                🎉 {getExercise(latestPR.exerciseId)?.name}
               </p>
             </div>
             <Pill className="bg-amber-glow/15 text-amber-glow ring-amber-glow/30">

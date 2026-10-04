@@ -13,6 +13,7 @@ import type { MealSlot, Profile } from '../types'
 export {
   DIET_LABEL,
   autoTargets,
+  dietLabel,
   goalLabel,
   restingEnergy,
   sumMacros,

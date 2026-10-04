@@ -1,15 +1,11 @@
 import {
-  DIFFICULTIES,
   DIFFICULTY_ORDER,
-  EQUIPMENT,
   EQUIPMENT_ORDER,
-  MOVEMENTS,
   MOVEMENT_ORDER,
-  MUSCLES,
-  MUSCLE_ACCENT,
   MUSCLE_ORDER,
 } from '../data'
 import { countActiveFilters, type LibraryFilters, type SortKey } from '../lib/search'
+import { difficultyMeta, equipmentMeta, movementMeta, muscleAccent, muscleMeta } from '../lib/labels'
 import type { Difficulty, Equipment, Movement, Muscle } from '../types'
 import { Button, IconFilter, SectionHeading } from './ui'
 
@@ -128,9 +124,9 @@ export function FilterPanel({
               key={muscle}
               checked={filters.muscles.includes(muscle)}
               onChange={() => onFiltersChange({ muscles: toggle(filters.muscles, muscle) })}
-              label={MUSCLES[muscle].label}
+              label={muscleMeta(muscle).label}
               count={counts[`muscle:${muscle}`] ?? 0}
-              accent={`border-transparent ${MUSCLE_ACCENT[muscle].bar.replace('bg-', 'text-')}`}
+              accent={`border-transparent ${muscleAccent(muscle).bar.replace('bg-', 'text-')}`}
             />
           ))}
         </div>
@@ -144,9 +140,9 @@ export function FilterPanel({
               key={level}
               checked={filters.difficulties.includes(level)}
               onChange={() => onFiltersChange({ difficulties: toggle(filters.difficulties, level) })}
-              label={`${DIFFICULTIES[level].indicator} ${DIFFICULTIES[level].label}`}
+              label={`${difficultyMeta(level).indicator} ${difficultyMeta(level).label}`}
               count={counts[`difficulty:${level}`] ?? 0}
-              accent={`border-transparent ${DIFFICULTIES[level].dot} text-ink-950`}
+              accent={`border-transparent ${difficultyMeta(level).dot} text-ink-950`}
             />
           ))}
         </div>
@@ -160,8 +156,8 @@ export function FilterPanel({
               key={movement}
               checked={filters.movements.includes(movement)}
               onChange={() => onFiltersChange({ movements: toggle(filters.movements, movement) })}
-              label={MOVEMENTS[movement].label}
-              hint={MOVEMENTS[movement].hint}
+              label={movementMeta(movement).label}
+              hint={movementMeta(movement).hint}
               count={counts[`movement:${movement}`] ?? 0}
             />
           ))}
@@ -176,7 +172,7 @@ export function FilterPanel({
               key={item}
               checked={filters.equipment.includes(item)}
               onChange={() => onFiltersChange({ equipment: toggle(filters.equipment, item) })}
-              label={EQUIPMENT[item].label}
+              label={equipmentMeta(item).label}
               count={counts[`equipment:${item}`] ?? 0}
             />
           ))}

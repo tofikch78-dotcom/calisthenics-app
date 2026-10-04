@@ -1,7 +1,16 @@
 import { useRef, useState } from 'react'
-import { EQUIPMENT, LIBRARY_STATS } from '../data'
-import { downloadBackup, formatBytes, readFileAsText, restoreBackup, storageFootprint } from '../lib/backup'
-import { DIET_LABEL, autoTargets, goalLabel } from '../lib/nutrition'
+import { LIBRARY_STATS } from '../data'
+import {
+  downloadBackup,
+  formatBytes,
+  inspectBackupFile,
+  readFileAsText,
+  restoreBackup,
+  storageFootprint,
+} from '../lib/backup'
+import type { BackupInspection } from '../lib/backup'
+import { equipmentLabel } from '../lib/labels'
+import { autoTargets, dietLabel, goalLabel } from '../lib/nutrition'
 import { Onboarding } from './Onboarding'
 import { InstallCard } from './InstallCard'
 import { OfflineReadinessCard } from './OfflineReadinessCard'
@@ -14,6 +23,7 @@ import {
   IconUpload,
   Pill,
   ProgressBar,
+  Sheet,
   StatTile,
   Toggle,
 } from './kit'
@@ -41,21 +51,44 @@ export function ProfileView({
   const [resetOpen, setResetOpen] = useState(false)
   const [resetConfirm, setResetConfirm] = useState('')
   const [message, setMessage] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null)
+  /**
+   * A file that has been read and checked but not yet applied. The raw text is
+   * held here rather than re-read, so what gets confirmed is exactly what was
+   * inspected, and holding the text also means Cancel is a state change and
+   * nothing else — no cleanup, no chance of a half-applied write.
+   */
+  const [pending, setPending] = useState<{ text: string; inspection: BackupInspection } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const footprint = storageFootprint()
   const targets = autoTargets(profile)
 
   const importFile = async (file: File) => {
+    let text: string
     try {
-      const text = await readFileAsText(file)
-      const result = restoreBackup(text)
-      setMessage({ tone: result.ok ? 'ok' : 'bad', text: result.message })
-      if (result.ok) window.setTimeout(() => window.location.reload(), 900)
+      text = await readFileAsText(file)
     } catch (error) {
       console.warn('[backup] import failed', error)
-      setMessage({ tone: 'bad', text: 'Could not read that file.' })
+      setMessage({ tone: 'bad', text: 'Could not read that file. Nothing has been changed.' })
+      return
     }
+
+    // Nothing is written until the user has seen what the file holds and agreed.
+    // A file that is not a usable backup never gets as far as the prompt.
+    const inspection = inspectBackupFile(text)
+    if (!inspection.ok) {
+      setMessage({ tone: 'bad', text: inspection.error ?? 'That file could not be read.' })
+      return
+    }
+    setPending({ text, inspection })
+  }
+
+  const confirmImport = () => {
+    if (!pending) return
+    const result = restoreBackup(pending.text)
+    setPending(null)
+    setMessage({ tone: result.ok ? 'ok' : 'bad', text: result.message })
+    if (result.ok) window.setTimeout(() => window.location.reload(), 900)
   }
 
   if (editing) {
@@ -91,7 +124,7 @@ export function ProfileView({
               {profile.age ? `${profile.age} yrs` : 'Age not set'}
               {profile.heightCm ? ` · ${profile.heightCm} cm` : ''}
               {profile.weightKg ? ` · ${profile.weightKg} kg` : ''} · {profile.level} ·{' '}
-              {DIET_LABEL[profile.diet]}
+              {dietLabel(profile.diet)}
             </p>
             <p className="mt-1 flex flex-wrap gap-1.5">
               {profile.goals.map((goal) => (
@@ -123,7 +156,7 @@ export function ProfileView({
           <p className="flex flex-wrap gap-1.5">
             {profile.equipment.map((item) => (
               <Pill key={item} className="bg-brand-400/12 text-brand-300 ring-brand-400/25">
-                {EQUIPMENT[item].label}
+                {equipmentLabel(item)}
               </Pill>
             ))}
           </p>
@@ -319,6 +352,135 @@ export function ProfileView({
       <p className="pb-2 text-center text-[10px] text-mist-500">
         Offline-first · No login · No server · Your data never leaves this device
       </p>
+
+      {pending && (
+        <ImportConfirm
+          inspection={pending.inspection}
+          onCancel={() => setPending(null)}
+          onConfirm={confirmImport}
+        />
+      )}
     </div>
   )
+}
+
+/**
+ * The last thing between the user and an overwrite.
+ *
+ * Everything destructive about an import is stated here before it happens: that
+ * this replaces what is on the device, what the file contains, and — when the
+ * file is a partial backup — exactly which datasets will be emptied, since that
+ * is the one outcome that would otherwise be invisible until after the reload.
+ *
+ * Rendered as a `Sheet` rather than an inline panel so it cannot be scrolled past
+ * by muscle memory, and so Escape, the backdrop and the close button all mean
+ * Cancel, which is the safe direction for every one of them to point.
+ */
+function ImportConfirm({
+  inspection,
+  onCancel,
+  onConfirm,
+}: {
+  inspection: BackupInspection
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const { file, present, missing, unknown } = inspection
+  const total = present.length + missing.length
+  const partial = missing.length > 0
+
+  return (
+    <Sheet
+      title="Replace your data with this backup?"
+      onClose={onCancel}
+      footer={
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="min-h-11 flex-1 rounded-lg border border-ink-600 text-xs font-medium text-mist-300 transition hover:bg-ink-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="min-h-11 flex-1 rounded-lg bg-brand-500 text-xs font-semibold text-white transition hover:bg-brand-400"
+          >
+            Import and replace
+          </button>
+        </div>
+      }
+    >
+      <p className="rounded-xl border border-rose-glow/30 bg-rose-glow/5 p-3 text-xs text-mist-200">
+        <span className="font-semibold text-rose-glow">This overwrites everything on this device.</span>{' '}
+        Your profile, workouts, sessions, history, records, nutrition and progress will all be replaced
+        by the contents of this file. It cannot be undone — export a backup first if you want to keep
+        what is already here.
+      </p>
+
+      <dl className="mt-3 space-y-2">
+        <div className="flex items-baseline justify-between gap-3 border-b border-ink-800 pb-1.5">
+          <dt className="text-[11px] text-mist-400">Backup format</dt>
+          <dd className="tnum text-[11px] font-semibold text-mist-100">
+            {file?.version ? `Version ${file.version}` : 'Unversioned'}
+          </dd>
+        </div>
+        {file?.exportedAt && (
+          <div className="flex items-baseline justify-between gap-3 border-b border-ink-800 pb-1.5">
+            <dt className="text-[11px] text-mist-400">Taken</dt>
+            <dd className="tnum text-[11px] font-semibold text-mist-100">{file.exportedAt}</dd>
+          </div>
+        )}
+        <div className="flex items-baseline justify-between gap-3 border-b border-ink-800 pb-1.5">
+          <dt className="text-[11px] text-mist-400">Datasets in this file</dt>
+          <dd className="tnum text-[11px] font-semibold text-mist-100">
+            {present.length} of {total}
+          </dd>
+        </div>
+        {unknown.length > 0 && (
+          <div className="flex items-baseline justify-between gap-3 border-b border-ink-800 pb-1.5">
+            <dt className="text-[11px] text-mist-400">Not recognised by this version</dt>
+            <dd className="tnum text-[11px] font-semibold text-mist-100">{unknown.length} ignored</dd>
+          </div>
+        )}
+      </dl>
+
+      {partial ? (
+        <p className="mt-3 rounded-xl border border-amber-glow/30 bg-amber-glow/5 p-3 text-[11px] text-mist-300">
+          <span className="font-semibold text-amber-glow">This is a partial backup.</span> It has no{' '}
+          {missing.length === 1 ? 'entry' : 'entries'} for{' '}
+          {missing.length === 1 ? 'one dataset' : `${missing.length} datasets`}, so{' '}
+          {missing.length === 1 ? 'it' : 'they'} will be reset to empty:{' '}
+          <span className="font-semibold text-mist-100">{missing.map(datasetLabel).join(', ')}</span>.
+          Import anyway only if that is what you want.
+        </p>
+      ) : (
+        <p className="mt-3 text-[11px] text-mist-400">
+          The file carries every dataset this app knows about, so nothing here will be emptied.
+        </p>
+      )}
+    </Sheet>
+  )
+}
+
+/** Storage keys are namespaced and machine-facing; the prompt needs words. */
+const DATASET_LABELS: Record<string, string> = {
+  'calisthenics:my-exercises': 'saved exercises',
+  'calisthenics:workouts': 'workouts',
+  'calisthenics:sessions': 'sessions',
+  'calisthenics:records': 'records',
+  'calisthenics:nutrition': 'nutrition days',
+  'calisthenics:nutrition-targets': 'nutrition targets',
+  'calisthenics:weight-log': 'weight entries',
+  'calisthenics:skills': 'skill stages',
+  'calisthenics:levels': 'level overrides',
+  'calisthenics:dismissed-suggestions': 'dismissed suggestions',
+  'calisthenics:profile': 'your profile',
+  'calisthenics:theme': 'appearance',
+  'calisthenics:active-session': 'the session in progress',
+}
+
+function datasetLabel(key: string): string {
+  return DATASET_LABELS[key] ?? key.replace('calisthenics:', '')
 }

@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "icons": "node scripts/generate-icons.mjs",
-    "check": "npm run verify && npm run verify:session && npm run verify:nutrition && npm run lint && npm run build",
+    "check": "npm run verify && npm run verify:session && npm run verify:nutrition && npm run verify:progress && npm run verify:robustness && npm run verify:backup && npm run lint && npm run build",
     "lint": "oxlint",
     "verify": "node verify-library.mjs",
     "verify:session": "node verify-session-flow.mjs",
     "verify:nutrition": "node verify-nutrition.mjs",
+    "verify:progress": "node verify-progress.mjs",
+    "verify:robustness": "node verify-robustness.mjs",
+    "verify:backup": "node verify-backup.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

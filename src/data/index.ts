@@ -4,7 +4,7 @@ import { LEG_EXERCISES } from './legs'
 import { PULL_EXERCISES } from './pull'
 import { PUSH_EXERCISES } from './push'
 import { SKILL_EXERCISES } from './skills'
-import { DIFFICULTIES, EQUIPMENT, MOVEMENTS, MUSCLES } from './taxonomy'
+import { difficultyLabel, equipmentLabel, movementLabel, muscleLabel } from '../lib/labels'
 
 export * from './taxonomy'
 
@@ -83,11 +83,11 @@ export const LIBRARY_STATS = {
  */
 function searchVocabulary(exercise: Exercise): string[] {
   return [
-    MUSCLES[exercise.mainMuscle].label,
-    ...exercise.secondaryMuscles.map((muscle) => MUSCLES[muscle].label),
-    MOVEMENTS[exercise.movement].label,
-    ...exercise.equipment.map((item) => EQUIPMENT[item].label),
-    DIFFICULTIES[exercise.difficulty].label,
+    muscleLabel(exercise.mainMuscle),
+    ...exercise.secondaryMuscles.map(muscleLabel),
+    movementLabel(exercise.movement),
+    ...exercise.equipment.map(equipmentLabel),
+    difficultyLabel(exercise.difficulty),
   ]
 }
 

@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import { getExercise } from '../data'
-import { formatDateKey, todayKey, startOfWeek } from '../lib/dates'
-import { allSuggestions, evidenceFor, type ProgressionSuggestion } from '../lib/progression'
+import { formatDateKey, startOfWeek, weekDays } from '../lib/dates'
+import { progressionReport, type ExerciseEvidence, type ProgressionSuggestion } from '../lib/progression'
 import { assessLevels } from '../lib/level'
-import { computeStreak, isTraining, totals, weekSummary } from '../lib/stats'
+import { computeStreak, groupSessionsByDate, isTraining, totals, weekSummary } from '../lib/stats'
+import { useTodayKey } from '../lib/use-today'
 import type {
   Difficulty,
   Exercise,
+  Muscle,
   Profile,
   RecordEntry,
   WeightEntry,
@@ -59,31 +61,49 @@ export function ProgressView({
 }: ProgressViewProps) {
   const [weightInput, setWeightInput] = useState('')
 
-  const streak = useMemo(() => computeStreak(sessions, profile, workouts), [sessions, profile, workouts])
+  // Everything below is a function of "today", and the app can stay open across
+  // midnight — so it is read live rather than frozen at mount.
+  const today = useTodayKey()
+
+  const streak = useMemo(
+    () => computeStreak(sessions, profile, workouts, today),
+    [sessions, profile, workouts, today],
+  )
   const all = useMemo(() => totals(sessions, profile, workouts), [sessions, profile, workouts])
   const week = useMemo(
-    () => weekSummary(sessions, profile, workouts, startOfWeek(todayKey())),
-    [sessions, profile, workouts],
+    () => weekSummary(sessions, profile, workouts, startOfWeek(today)),
+    [sessions, profile, workouts, today],
   )
 
-  /** Exercises and sets you actually finished this week. */
+  /**
+   * The sessions inside this week, read once.
+   *
+   * The muscle balance and the weekly volume used to filter `sessions` with
+   * `date >= monday` on their own, which also counted a session dated later in
+   * the week — and could reach beyond it — so the numbers under "Muscles trained
+   * this week" did not have to agree with the week summary above them.
+   */
+  const weekSessions = useMemo(() => {
+    const byDate = groupSessionsByDate(sessions)
+    return weekDays(startOfWeek(today)).flatMap((date) => byDate.get(date) ?? [])
+  }, [sessions, today])
+
+  /** Exercises finished this week, and how much of the week was training. */
   const weeklyVolume = useMemo(() => {
-    const start = startOfWeek(todayKey())
-    const recent = sessions.filter((session) => session.date >= start && isTraining(session))
-    const done = recent.reduce(
+    const training = weekSessions.filter(isTraining)
+    const done = training.reduce(
       (sum, session) => sum + session.items.filter((item) => item.status === 'completed').length,
       0,
     )
-    const available = recent.reduce((sum, session) => sum + session.items.length, 0)
-    return { sessions: recent.length, completion: available ? Math.round((done / available) * 100) : 0 }
-  }, [sessions])
+    const available = training.reduce((sum, session) => sum + session.items.length, 0)
+    return { sessions: training.length, completion: available ? Math.round((done / available) * 100) : 0 }
+  }, [weekSessions])
 
   /** Muscles trained this week, by completed exercise. */
   const weeklyMuscles = useMemo(() => {
-    const start = startOfWeek(todayKey())
-    const counts = new Map<string, number>()
-    for (const session of sessions) {
-      if (session.date < start) continue
+    const counts = new Map<Muscle, number>()
+    for (const session of weekSessions) {
+      if (!isTraining(session)) continue
       for (const item of session.items) {
         if (item.status !== 'completed') continue
         const exercise = getExercise(item.exerciseId)
@@ -92,20 +112,32 @@ export function ProgressView({
       }
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [weekSessions])
+
+  /**
+   * The exercises actually trained, and one pass over the sessions for all of
+   * them. The dashboard needs this twice — for the suggestions and for the
+   * progression table — and reading it per exercise re-sorted every session
+   * list once per exercise, twice.
+   */
+  const trainedExercises = useMemo(() => {
+    const ids = new Set(
+      sessions.filter(isTraining).flatMap((session) => session.items.map((item) => item.exerciseId)),
+    )
+    return [...ids]
+      .map((id) => getExercise(id))
+      .filter((exercise): exercise is Exercise => Boolean(exercise))
   }, [sessions])
 
-  const suggestions = useMemo(() => {
-    const trainedIds = [
-      ...new Set(
-        sessions
-          .filter(isTraining)
-          .flatMap((session) => session.items.map((item) => item.exerciseId)),
-      ),
-    ]
-    return allSuggestions(sessions, trainedIds).filter(
-      (suggestion) => !dismissed[`${suggestion.key}:${suggestion.verdict}`],
-    )
-  }, [sessions, dismissed])
+  const report = useMemo(
+    () => progressionReport(sessions, trainedExercises, getExercise),
+    [sessions, trainedExercises],
+  )
+
+  const suggestions = useMemo(
+    () => report.suggestions.filter((s) => !dismissed[`${s.key}:${s.verdict}`]),
+    [report, dismissed],
+  )
 
   const latestWeight = weight[weight.length - 1]
   const firstWeight = weight[0]
@@ -120,10 +152,19 @@ export function ProgressView({
         <StatTile
           value={streak.days}
           label="Day streak"
-          hint={streak.active ? 'Active today' : 'Train today to keep it'}
+          hint={streakHint(streak)}
           tone={streak.days > 0 ? 'ok' : 'default'}
         />
-        <StatTile value={week.completion} label="This week" suffix="%" tone="brand" />        <StatTile value={all.sets} label="All-time sets" />
+        {/* A share of the sets done, not of the days: labelled bare, beside
+            the day counts below, it read as "days finished this week". */}
+        <StatTile
+          value={week.completion}
+          label="This week"
+          suffix="%"
+          hint="of the sets you planned"
+          tone="brand"
+        />
+        <StatTile value={all.sets} label="All-time sets" />
         <StatTile value={all.reps} label="All-time reps" />
       </div>
 
@@ -137,7 +178,7 @@ export function ProgressView({
           >
             <div>
               <div className="tnum text-lg leading-none font-bold text-mist-100">{week.completion}%</div>
-              <div className="mt-0.5 text-[9px] text-mist-400">weekly</div>
+              <div className="mt-0.5 text-[9px] text-mist-400">sets done</div>
             </div>
           </ProgressRing>
 
@@ -208,10 +249,12 @@ export function ProgressView({
             onClick={() => {
               const value = Number(weightInput)
               if (!Number.isFinite(value) || value <= 0) return
-              onLogWeight(todayKey(), value)
+              onLogWeight(today, value)
               setWeightInput('')
             }}
-            disabled={!weightInput}
+            // Gated on the value itself, not on there being text: "0" used to
+            // enable a button that then silently refused to log anything.
+            disabled={!(Number(weightInput) > 0)}
             className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-400 disabled:bg-ink-700 disabled:text-ink-500"
           >
             <IconPlus className="h-3.5 w-3.5" /> Log today
@@ -231,10 +274,11 @@ export function ProgressView({
 
         {weight.length > 0 && (
           <details className="mt-2">
-            <summary className="cursor-pointer text-[11px] text-mist-400 hover:text-mist-200">
-              All {weight.length} entries
+            {/* A disclosure is still a control: it was a single line of 11px text. */}
+            <summary className="flex min-h-11 cursor-pointer items-center text-[11px] text-mist-400 hover:text-mist-200">
+              All {weight.length} {weight.length === 1 ? 'entry' : 'entries'}
             </summary>
-            <ul className="mt-2 space-y-1">
+            <ul className="space-y-1">
               {[...weight].reverse().map((entry) => (
                 <li key={entry.date} className="flex items-center gap-2 text-[11px]">
                   <span className="tnum flex-1 text-mist-400">{formatDateKey(entry.date)}</span>
@@ -243,9 +287,9 @@ export function ProgressView({
                     type="button"
                     onClick={() => onDeleteWeight(entry.date)}
                     aria-label={`Delete entry for ${entry.date}`}
-                    className="rounded p-0.5 text-mist-500 hover:text-rose-glow"
+                    className="-my-2 grid size-11 shrink-0 place-items-center rounded-md text-mist-500 transition hover:text-rose-glow"
                   >
-                    <IconTrash className="h-3 w-3" />
+                    <IconTrash className="h-3.5 w-3.5" />
                   </button>
                 </li>
               ))}
@@ -256,11 +300,11 @@ export function ProgressView({
 
       {/* Weekly muscle balance */}
       <Card>
-        <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
           <h3 className="text-sm font-semibold text-mist-100">Muscles trained this week</h3>
           <span className="tnum text-[11px] text-mist-400">
             {weeklyVolume.sessions} session{weeklyVolume.sessions === 1 ? '' : 's'} ·{' '}
-            {weeklyVolume.completion}% of planned exercises done
+            {weeklyVolume.completion}% of exercises done
           </span>
         </div>
         {weeklyMuscles.length === 0 ? (
@@ -270,7 +314,7 @@ export function ProgressView({
             {weeklyMuscles.map(([muscle, count]) => (
               <li key={muscle} className="flex items-center gap-2">
                 <span className="w-24 shrink-0">
-                  <MusclePill muscle={muscle as never} />
+                  <MusclePill muscle={muscle} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <ProgressBar
@@ -322,7 +366,8 @@ export function ProgressView({
           Your recent record per exercise, and the level the app assessed for you.
         </p>
         <ExerciseProgression
-          sessions={sessions}
+          exercises={trainedExercises}
+          evidence={report.evidence}
           overrides={overrides}
           assessment={assessment}
           onSetLevel={onSetLevel}
@@ -346,6 +391,16 @@ export function ProgressView({
       </button>
     </div>
   )
+}
+
+/**
+ * Honest wording for a streak that does not exist yet: telling someone to "keep"
+ * a streak of zero invites them to look for something they never started.
+ */
+function streakHint(streak: { days: number; active: boolean }): string {
+  if (streak.active) return 'Active today'
+  if (streak.days > 0) return 'Train today to keep it'
+  return 'Log a session to start one'
 }
 
 const VERDICT_TONE: Record<
@@ -380,8 +435,8 @@ function SuggestionRow({
         {suggestion.nextExercise && (
           <button
             type="button"
-            onClick={() => onOpenExercise(suggestion.nextExercise!)}
-            className="inline-flex items-center gap-1 rounded-lg border border-lime-glow/30 px-2.5 py-1 text-[11px] text-lime-glow transition hover:bg-lime-glow/10"
+            onClick={() => suggestion.nextExercise && onOpenExercise(suggestion.nextExercise)}
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-lime-glow/30 px-2.5 py-1 text-[11px] text-lime-glow transition hover:bg-lime-glow/10"
           >
             Look at {suggestion.nextExercise.name} →
           </button>
@@ -390,7 +445,7 @@ function SuggestionRow({
           <button
             type="button"
             onClick={() => onOpenExercise(suggestion.fallbackExercise!)}
-            className="inline-flex items-center gap-1 rounded-lg border border-amber-glow/30 px-2.5 py-1 text-[11px] text-amber-glow transition hover:bg-amber-glow/10"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-amber-glow/30 px-2.5 py-1 text-[11px] text-amber-glow transition hover:bg-amber-glow/10"
           >
             Drop back to {suggestion.fallbackExercise.name}
           </button>
@@ -407,14 +462,19 @@ function SuggestionRow({
   )
 }
 
+/** Longest list rendered before the filter takes over. */
+const PROGRESSION_ROWS = 25
+
 function ExerciseProgression({
-  sessions,
+  exercises,
+  evidence,
   overrides,
   assessment,
   onSetLevel,
   onOpenExercise,
 }: {
-  sessions: WorkoutSession[]
+  exercises: Exercise[]
+  evidence: Map<string, ExerciseEvidence>
   overrides: Record<string, Difficulty>
   assessment: { levels: Record<string, Difficulty>; sources: Record<string, string> }
   onSetLevel: (exerciseId: string, level: Difficulty | null) => void
@@ -422,41 +482,49 @@ function ExerciseProgression({
 }) {
   const [query, setQuery] = useState('')
 
+  // The evidence was already read once on the dashboard, so this table reads it
+  // from that rather than re-deriving it per exercise.
   const rows = useMemo(() => {
-    const trainedIds = [
-      ...new Set(sessions.filter(isTraining).flatMap((session) => session.items.map((item) => item.exerciseId))),
-    ]
-    return trainedIds
-      .map((id) => {
-        const exercise = getExercise(id)
-        if (!exercise) return null
-        const evidence = evidenceFor(id, sessions)
+    const term = query.trim().toLowerCase()
+    return exercises
+      .map((exercise) => {
+        const found = evidence.get(exercise.id)
         return {
-          id,
+          id: exercise.id,
+          exercise,
           name: exercise.name,
           muscle: exercise.mainMuscle,
-          level: overrides[id] ?? assessment.levels[id],
-          isOverride: Boolean(overrides[id]),
-          source: assessment.sources[id],
-          sessions: evidence?.sessions.length ?? 0,
-          hitRate: evidence ? Math.round(evidence.hitRate * 100) : 0,
-          cleanStreak: evidence?.cleanStreak ?? 0,
-          best: evidence?.bestSet,
+          // Both are needed: `level` is what the user sees, and once an override
+          // is in place it *is* the override, so the automatic estimate has to be
+          // kept separately or the buttons go on announcing the manual value as
+          // the automatic one.
+          level: overrides[exercise.id] ?? assessment.levels[exercise.id],
+          autoLevel: assessment.levels[exercise.id],
+          isOverride: Boolean(overrides[exercise.id]),
+          source: assessment.sources[exercise.id],
+          sessions: found?.sessions.length ?? 0,
+          hitRate: found ? Math.round(found.hitRate * 100) : 0,
+          cleanStreak: found?.cleanStreak ?? 0,
+          best: found?.bestSet,
         }
       })
-      .filter((row): row is NonNullable<typeof row> => Boolean(row))
-      .filter((row) => !query.trim() || row.name.toLowerCase().includes(query.trim().toLowerCase()))
+      .filter((row) => !term || row.name.toLowerCase().includes(term))
       .sort((a, b) => b.sessions - a.sessions)
-      .slice(0, 25)
-  }, [sessions, overrides, assessment, query])
+  }, [exercises, evidence, overrides, assessment, query])
 
   if (!rows.length) {
     return (
       <p className="mt-3 py-6 text-center text-xs text-mist-400">
-        Nothing trained yet. Complete a session and each exercise shows up here with its history.
+        {query.trim()
+          ? `Nothing trained matches “${query.trim()}”.`
+          : 'Nothing trained yet. Complete a session and each exercise shows up here with its history.'}
       </p>
     )
   }
+
+  // Filtered before the cap, so searching always finds the row it is looking for.
+  const shown = rows.slice(0, PROGRESSION_ROWS)
+  const hidden = rows.length - shown.length
 
   return (
     <>
@@ -469,17 +537,14 @@ function ExerciseProgression({
       />
 
       <ul className="mt-3 space-y-1.5">
-        {rows.map((row) => (
+        {shown.map((row) => (
           <li
             key={row.id}
             className="flex flex-wrap items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5"
           >
             <button
               type="button"
-              onClick={() => {
-                const exercise = getExercise(row.id)
-                if (exercise) onOpenExercise(exercise)
-              }}
+              onClick={() => onOpenExercise(row.exercise)}
               className="min-w-0 flex-1 text-left"
             >
               <div className="flex flex-wrap items-center gap-1.5">
@@ -488,7 +553,7 @@ function ExerciseProgression({
                 {row.isOverride ? (
                   <Pill className="bg-brand-400/15 text-brand-300 ring-brand-400/30">Manual</Pill>
                 ) : (
-                  <DifficultyBadge level={row.level as Difficulty} />
+                  <DifficultyBadge level={row.level} />
                 )}
               </div>
               <p className="tnum mt-0.5 text-[10px] text-mist-400">
@@ -510,15 +575,17 @@ function ExerciseProgression({
                     aria-pressed={row.isOverride ? isCurrent : undefined}
                     aria-label={
                       isCurrent && row.isOverride
-                        ? `Reset ${row.name} to its automatic level (currently ${level})`
-                        : `Set ${row.name} to ${level} (automatic level is ${row.level} — ${row.source})`
+                        ? `Reset ${row.name} to its automatic level (${row.autoLevel})`
+                        : `Set ${row.name} to ${level} (automatic level is ${row.autoLevel} — ${row.source})`
                     }
                     title={
                       row.isOverride
                         ? 'Set level'
-                        : `Set manually (auto: ${row.level} — ${row.source})`
+                        : `Set manually (auto: ${row.autoLevel} — ${row.source})`
                     }
-                    className={`grid h-11 w-8 place-items-center rounded-md text-sm font-semibold transition ${
+                    // 44×32 was not a thumb target; the row wraps if the three
+                    // of them no longer leave room for the name.
+                    className={`grid size-11 place-items-center rounded-md text-sm font-semibold transition ${
                       isCurrent
                         ? 'bg-brand-500/20 text-brand-300 ring-1 ring-brand-400/40'
                         : 'bg-ink-800 text-mist-500 hover:text-mist-200'
@@ -533,22 +600,25 @@ function ExerciseProgression({
         ))}
       </ul>
 
+      {hidden > 0 && (
+        <p className="mt-2 text-center text-[10px] text-mist-500">
+          {hidden} more trained exercise{hidden === 1 ? '' : 's'} — filter to find {hidden === 1 ? 'it' : 'them'}.
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[10px] text-mist-500">
           Tap an emoji to override that exercise&apos;s assessed level; tap it again to go back to automatic.
-          {rows.some((row) => row.isOverride) && (
-            <>
-              {' '}
-              <button
-                type="button"
-                onClick={() => rows.filter((row) => row.isOverride).forEach((row) => onSetLevel(row.id, null))}
-                className="ml-1 rounded px-1 py-0.5 text-brand-300 underline underline-offset-2"
-              >
-                Reset all overrides
-              </button>
-            </>
-          )}
         </span>
+        {rows.some((row) => row.isOverride) && (
+          <button
+            type="button"
+            onClick={() => rows.filter((row) => row.isOverride).forEach((row) => onSetLevel(row.id, null))}
+            className="inline-flex min-h-11 items-center rounded-lg px-2 text-[10px] text-brand-300 underline underline-offset-2"
+          >
+            Reset all overrides
+          </button>
+        )}
       </div>
     </>
   )

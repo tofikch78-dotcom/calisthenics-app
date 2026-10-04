@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { LIBRARY } from '../data'
 import {
   EMPTY_FILTERS,
@@ -8,6 +8,7 @@ import {
   type SortKey,
 } from '../lib/search'
 import type { Exercise } from '../types'
+import { useEscape } from '../lib/use-escape'
 import { ExerciseCard } from './ExerciseCard'
 import { FilterPanel, MobileFilterButton } from './FilterPanel'
 import { EmptyState, IconClose, IconSearch } from './ui'
@@ -43,6 +44,8 @@ export function LibraryView({ savedIds, onToggleSave, onOpen }: LibraryViewProps
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
   const counts = useMemo(() => buildFacetCounts(), [])
+  const closeMobileFilters = useCallback(() => setMobileFiltersOpen(false), [])
+  useEscape(closeMobileFilters)
   const results = useMemo(
     () => queryLibrary({ ...filters, sort }, savedIds),
     [filters, sort, savedIds],
@@ -165,6 +168,9 @@ export function LibraryView({ savedIds, onToggleSave, onOpen }: LibraryViewProps
       {/* Mobile filter sheet */}
       {mobileFiltersOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filters"
           className="fixed inset-0 z-40 flex items-end bg-black/70 backdrop-blur-sm lg:hidden"
           onClick={(event) => {
             if (event.target === event.currentTarget) setMobileFiltersOpen(false)

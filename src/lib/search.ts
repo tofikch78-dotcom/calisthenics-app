@@ -262,6 +262,20 @@ export const MUSCLE_EXERCISE_COUNTS: Record<Muscle, { all: number; primary: numb
     ]),
   ) as Record<Muscle, { all: number; primary: number }>
 
+/**
+ * The count for a muscle, for the ids that reach here off a stored workout.
+ * A muscle this build's taxonomy has no entry for reports nothing rather than
+ * being a `.primary` on `undefined`.
+ */
+export function muscleExerciseCount(muscle: string): { all: number; primary: number } {
+  return (
+    (MUSCLE_EXERCISE_COUNTS as Record<string, { all: number; primary: number }>)[muscle] ?? {
+      all: 0,
+      primary: 0,
+    }
+  )
+}
+
 export function countActiveFilters(filters: LibraryFilters): number {
   return (
     (filters.query.trim() ? 1 : 0) +

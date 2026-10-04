@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { DIFFICULTIES, MOVEMENTS, MUSCLES, getExercise } from '../data'
-import { equipmentLabel } from '../lib/labels'
+import { getExercise } from '../data'
+import { difficultyLabel, equipmentLabel, movementLabel, muscleLabel } from '../lib/labels'
 import { findAlternatives, formatDosage, formatRest } from '../lib/search'
 import type { Exercise } from '../types'
 import { ExerciseAnimation } from './ExerciseAnimation'
@@ -169,7 +169,7 @@ function Alternatives({
       {similar.length > 0 && (
         <div>
           <h4 className="mb-2.5 text-xs font-semibold tracking-[0.14em] text-mist-400 uppercase">
-            Similar {MOVEMENTS[exercise.movement].label.toLowerCase()} exercises
+            Similar {movementLabel(exercise.movement).toLowerCase()} exercises
           </h4>
           <div className="flex flex-wrap gap-1.5">
             {similar.slice(0, 10).map((item) => (
@@ -275,11 +275,11 @@ export function ExerciseDetail({
             </p>
 
             <dl className="mt-5">
-              <Row label="Primary muscle" value={MUSCLES[exercise.mainMuscle].label} />
+              <Row label="Primary muscle" value={muscleLabel(exercise.mainMuscle)} />
               {secondary.length > 0 && (
-                <Row label="Secondary muscles" value={secondary.map((m) => MUSCLES[m].label).join(', ')} />
+                <Row label="Secondary muscles" value={secondary.map(muscleLabel).join(', ')} />
               )}
-              <Row label="Difficulty" value={DIFFICULTIES[exercise.difficulty].label} />
+              <Row label="Difficulty" value={difficultyLabel(exercise.difficulty)} />
               <Row label="Equipment" value={exercise.equipment.map(equipmentLabel).join(', ')} />
               <Row label="Recommended" value={`${formatDosage(exercise.dosage)} · rest ${formatRest(exercise.dosage.restSec)}`} />
             </dl>
